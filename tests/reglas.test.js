@@ -411,3 +411,31 @@ test("enteros en una factura con céntimos: los que cuadran no se tocan", () => 
   const d = R.extraer(texto, { cabecera: ["base_imponible"], linea: ["descripcion", "importe"] });
   assert.deepEqual(d.lineas.map((l) => l.importe), [300, 12.5, 4.25]);
 });
+
+
+// Factura-tique de un mayorista (foto de un usuario), texto real de Tesseract con sus errores:
+// "CiF: 591413534" (B leída como 5), DNI sin letra, "SL" leído "Si", columnas U/V y U/C,
+// y una tabla Base / %IVA / IVA / %Rec / Rec / Imp con valores ilegibles.
+const REYES = "ko    a\nKC —o_——    We 7\nÁ eyes    |\nTa    N\nCono\nfOBX Jm.\nWww frutossecosrayes \"a\nDISTR    ai    us\nl    IBUTDORES DE FRUTOS SECOS REYES SEVILLA,    Si\nCiF: 591413534\n41309 -    SAN    JOS\nPG.    IND.    CAÑANO 1 CA RENCONADA, SEVILLA\n955704812    AV COMUNICACION, 341\nFACTURA 2026 / FV38 / 4397\n01/10/2026\nATENDIDO POR: EMILIO CALAHUCHE GARCIA\n23506\nCARLOS ENRIQUE TORRES GALVEZ\n78105855\nPC    SAN ANTONIO ABAD 6\nE    DOS HERMANAS\ny    41014 (SEVILLA)\nFORMA DE PAGO: EFECTIVO CONTADO\nCod.    Desc.    U/N    U/C PRECIO    Suma\n1261    GIR. AGUASAL CAJA 15 UD    15    10,23    10,23\n26A0525260\n1390    GIR. AGUASAL BOLSA 25 UD    1    25    7,95    7,98\n2640527258\nBase.    % IVA    IVA    YREC    en    us\n18,18    10    1,82    1,40    $    $\nTotal    20.25 *\n";
+
+test("tique de mayorista: códigos, U/C, NIF sin letra y tabla de impuestos en columnas", () => {
+  const d = R.extraer(REYES, TODO);
+  assert.equal(d.numero_factura, "2026/FV38/4397");
+  assert.equal(d.fecha, "2026-10-01");
+  assert.equal(d.emisor_nif, "B91413534");
+  assert.match(d.emisor_nombre, /FRUTOS SECOS REYES SEVILLA/);
+  assert.equal(d.cliente_nif, "78105855V");
+  assert.equal(d.cliente_nombre, "CARLOS ENRIQUE TORRES GALVEZ");
+  assert.equal(d.forma_pago, "Efectivo");
+  assert.deepEqual([d.base_imponible, d.tipo_iva, d.cuota_iva, d.total], [18.18, "10", 1.82, 20.25]);
+  assert.deepEqual(d.lineas.map((l) => [l.referencia, l.descripcion, l.cantidad, l.precio_unitario, l.importe, l.tipo_iva]), [
+    ["1261", "GIR. AGUASAL CAJA 15 UD", 1, 10.23, 10.23, 10],
+    ["1390", "GIR. AGUASAL BOLSA 25 UD", 1, 7.95, 7.95, 10],
+  ]);
+});
+
+test("recargo de equivalencia calculado con base x %Rec si no se lee", () => {
+  const d = R.extraer(REYES, { cabecera: ["recargo_equivalencia", "total"], linea: [] });
+  assert.equal(d.recargo_equivalencia, 0.25);
+  assert.ok(!d.avisos.some((a) => /no coincide/.test(a)), d.avisos.join(" | "));
+});
