@@ -245,7 +245,13 @@ $("#leer").addEventListener("click", async () => {
     if (modo === "gratis") {
       texto = await LectorGratis.leerTexto(paginas.map((p) => p.fichero), estado);
       res = ReglasFactura.extraer(texto, sel, Object.fromEntries(catalogo.cabecera.map((c) => [c.clave, c.etiqueta])));
-      if (res.vacio) throw new Error(res.avisos[0]);
+      const pedidos = sel.cabecera.length, hallados = sel.cabecera.filter((c) => res[c] !== null && res[c] !== undefined).length;
+      const lineasMal = (res.lineas || []).filter((l) => ["cantidad", "precio_unitario", "importe"].some((c) => c in l && l[c] === null)).length;
+      const pobre = res.vacio || (pedidos >= 3 && hallados < pedidos / 3) ||
+        (sel.linea.length > 0 && (!(res.lineas || []).length || lineasMal > res.lineas.length / 3));
+      const mala = LectorGratis.avisoCalidad(pobre);
+      if (res.vacio) throw new Error(mala || res.avisos[0]);
+      if (mala) res.avisos.unshift(mala);
     } else {
       estado("Enviando a la IA…");
       const datos = new FormData();

@@ -207,3 +207,81 @@ test("errores del OCR en los importes se corrigen con cantidad x precio", () => 
   assert.equal(d.numero_factura, "T-88");
   assert.ok(d.avisos.some((a) => a.includes("«Bombilla LED»")), d.avisos.join(" | "));
 });
+
+// Factura real de un mayorista (foto de un usuario), transcrita como la daría una foto nítida.
+const MAYORISTA = `
+Factura No:     FV/2026/24583
+Fecha Factura:  14-07-2026
+Albarán:        PV/2026/26604
+Cliente: CARLOS ENRIQUE
+TORREZGALVEZ
+CIF: 78105855V
+DireccionC/SAN ANTONIO ABAD Nº 6 ESQ. A
+Código postal: 41014
+Localidad: Sevilla
+LO QUE TE GUSTA, MÁS CERCA DE TI
+RIZO & HERRERA SL
+PLG.Calonge,C. Magnesio, 7,
+41007 Sevilla
+Tel: 954 876 066 - 649 123 923
+Email: ventas@mibodeguita.es
+C.I.F: B92411750
+Nº RS: 40.072843/SE
+FORMA DE PAGO: CONTADO
+Vencimiento: 14/07/2026
+Peso: 128.88 kg
+CODIGO          DESCRIPCION                        LOTE      CADUCIDAD  CANTIDAD   PRECIO €/u  %DTOS  % IVA  TOTAL SIN IVA
+BE - BE0012-C545  POSTOBON UVA 2Lt PQTx6           530406    20-09-2026   1,0000    13,0200     0,00   21,0     13,02 €
+                                                                          Und
+BE - BE0013-C544  POSTOBON COLOMBIANA 2Lt PQTx6    531266    15-12-2026   1,0000 Und  13,0200   0,00   21,0     13,02 €
+DU-CHD00002-C532  PANELA REDONDA COEXITO 454g Cx24 LC2026    19-07-2027   4,0000    1,4800      0,00   10,0      5,92 €
+G - 7200-C398     SALTIN NOEL 300g Cx12            202609    17-02-2027   2,0000    1,8000      0,00   10,0      3,60 €
+GR-2910201        FRIJOL ROJO SEDA DE MI PAIS SACO 22.7Kg  20260606  16-04-2028  1,0000  70,0000  0,00  4,0  70,00 €
+M-VA011-C265      SALSA VALENTINA NEGRA (MUY PICANTE) 370ml  300930  29-09-2030  2,0000  1,9000  0,00  10,0  3,80 €
+SN-93-000-C486    DIANA TORTILLA JALAPEÑO 150g Cx45  3814-   13-04-2027  10,0000   1,6900     0,00   10,0     16,90 €
+Z - EP2000-C705   HAPPY EMPANADA POLLO x5und Cx24  055       08-06-2027   5,0000    4,5000      0,00   10,0     22,50 €
+Página 1 de 2
+`;
+
+test("factura de mayorista: 4 decimales, lote, caducidad, %dto y %IVA", () => {
+  const d = R.extraer(MAYORISTA, TODO);
+  assert.equal(d.numero_factura, "FV/2026/24583");
+  assert.equal(d.fecha, "2026-07-14");
+  assert.equal(d.vencimiento, "2026-07-14");
+  assert.equal(d.emisor_nombre, "RIZO & HERRERA SL");
+  assert.equal(d.emisor_nif, "B92411750");
+  assert.equal(d.cliente_nombre, "CARLOS ENRIQUE");
+  assert.equal(d.cliente_nif, "78105855V");
+  assert.equal(d.forma_pago, "Efectivo");
+  assert.deepEqual(d.lineas.map((l) => [l.referencia, l.descripcion, l.cantidad, l.precio_unitario, l.tipo_iva, l.importe]), [
+    ["BE - BE0012-C545", "POSTOBON UVA 2Lt PQTx6", 1, 13.02, 21, 13.02],
+    ["BE - BE0013-C544", "POSTOBON COLOMBIANA 2Lt PQTx6", 1, 13.02, 21, 13.02],
+    ["DU-CHD00002-C532", "PANELA REDONDA COEXITO 454g Cx24", 4, 1.48, 10, 5.92],
+    ["G - 7200-C398", "SALTIN NOEL 300g Cx12", 2, 1.8, 10, 3.6],
+    ["GR-2910201", "FRIJOL ROJO SEDA DE MI PAIS SACO 22.7Kg", 1, 70, 4, 70],
+    ["M-VA011-C265", "SALSA VALENTINA NEGRA (MUY PICANTE) 370ml", 2, 1.9, 10, 3.8],
+    ["SN-93-000-C486", "DIANA TORTILLA JALAPEÑO 150g Cx45", 10, 1.69, 10, 16.9],
+    ["Z - EP2000-C705", "HAPPY EMPANADA POLLO x5und Cx24", 5, 4.5, 10, 22.5],
+  ]);
+  assert.equal(d.lineas[0].importe_iva, 15.75);   // 13,02 + 21 %
+  assert.ok(!d.avisos.some((a) => /Revisa/.test(a)), d.avisos.join(" | "));
+});
+
+test("importes con 4 decimales y descuento en %", () => {
+  assert.equal(R.parsearImporte("13,0200"), 13.02);
+  assert.equal(R.parsearImporte("1,0000"), 1);
+  assert.equal(R.parsearImporte("1.234"), 1234);
+  const l = R.lineaProducto("Caja de tornillos     10,0000    2,5000    10,00    21,0    22,50 €");
+  assert.deepEqual([l.cantidad, l.precio, l.descuento, l.tipo_iva, l.importe], [10, 2.5, 2.5, 21, 22.5]);
+});
+
+test("basura del OCR en las columnas de números", () => {
+  const t = (l) => { const r = R.lineaProducto(l); return r && [r.descripcion, r.cantidad, r.precio, r.importe, r.revisar]; };
+  assert.deepEqual(t("B-202 Tornillo modelo M3                 1     ==:     2,25"), ["Tornillo modelo M3", 1, 2.25, 2.25, false]);
+  assert.deepEqual(t("B-205 Tornillo modelo M6                 1     3-75     =="), ["Tornillo modelo M6", 1, 3.75, 3.75, false]);
+  assert.deepEqual(t("A-110 Mantenimiento anual caldera        1 120,080 120,00").slice(3), [120, true]);
+  // una fila ilegible no se pega a la anterior: se añade para revisar
+  const ls = R.buscarProductos(["B-204 Tornillo modelo M5    1   3,25   3,25", "B-205 Tornillo modelo M6    1   3#7   ##"]);
+  assert.deepEqual(ls.map((l) => [l.referencia, l.descripcion, l.importe, l.revisar]),
+    [["B-204", "Tornillo modelo M5", 3.25, false], ["B-205", "Tornillo modelo M6", null, true]]);
+});
