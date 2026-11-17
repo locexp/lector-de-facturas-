@@ -24,6 +24,10 @@ Rellena solo los campos del esquema. Reglas:
 - Fechas en formato AAAA-MM-DD.
 - NIF/CIF/NIE en mayúsculas, sin espacios, puntos ni guiones.
 - El emisor es quien vende y cobra; el cliente es quien compra.
+- Los títulos de columnas y datos pueden venir abreviados: Desc./Concepto = descripción,
+  Cód./Ref./Art. = referencia, Cant./Ctd./Uds./U/V = cantidad, P.U./PVP = precio unitario,
+  Dto./Dcto. = descuento, Imp./Suma/Total = importe, B.I./Base imp. = base imponible,
+  Rec./R.E. = recargo de equivalencia, Ret. = retención IRPF, Fra./Fact. = factura, Vto. = vencimiento.
 - Si te piden un dato derivado que no aparece escrito pero se puede calcular sin ambigüedad
   (por ejemplo precio con IVA = precio x (1 + %IVA)), calcúlalo y redondea a 2 decimales.
 - En "avisos" explica en español, brevemente, cualquier duda (texto borroso, factura cortada,

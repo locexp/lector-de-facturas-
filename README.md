@@ -54,6 +54,13 @@ distintas y se queda con la primera en la que la suma de las líneas cuadra con 
 productos al peso («1,352 kg 10,95 €/kg»), el desglose de IVA por tipos de los tiques y
 comprueba la cuota con base × tipo. Lo que no se lee bien se deja vacío y se marca para revisar.
 
+**Nombres abreviados:** la app entiende los títulos de columnas y datos completos o abreviados
+(«Descripción / Desc. / Concepto», «Cantidad / Cant. / Ctd. / Uds.», «Precio / P.U. / PVP»,
+«Importe / Imp. / Suma», «Dto. / Dcto.», «B.I. / Base imp.», «Rec. / R.E.», «Ret.», «Tot.»,
+«Fra. / Fact.», «Fec.», «Vto.», «Cli.», «F. pago»...). Con la cabecera de la tabla sabe qué columna
+es cada número, aunque haya columnas vacías. La lista está en `web/reglas.js` (`COLUMNAS` y
+`RESUMEN`): para añadir una abreviatura nueva basta con escribirla ahí.
+
 **Consejos para el modo gratuito:** foto de frente, con buena luz, sin sombras y que la
 factura ocupe toda la imagen. Si una factura sale mal, prueba el modo IA.
 

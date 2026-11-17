@@ -505,3 +505,56 @@ test("base por línea: se calcula con un solo tipo de IVA y se explica si hay va
   assert.equal(varias.base_imponible, 42.4);
   assert.ok(varias.avisos.some((a) => /no dice cuál es el de cada producto/.test(a)), varias.avisos.join(" | "));
 });
+
+// ---------- abreviaturas en las cabeceras y etiquetas ----------
+test("diccionario de columnas: nombres completos y abreviados", () => {
+  const c = (t) => R.columnasTabla(t);
+  assert.deepEqual(c("Cód.   Desc.   Ctd.   P.U.   Dto.   Imp."), ["referencia", "descripcion", "cantidad", "precio", "dto", "importe"]);
+  assert.deepEqual(c("Código    Descripción    Cantidad    Precio    % Dto    Importe"), ["referencia", "descripcion", "cantidad", "precio", "dto", "importe"]);
+  assert.deepEqual(c("Ref.  Concepto  Uds.  PVP  Total"), ["referencia", "descripcion", "cantidad", "precio", "importe"]);
+  assert.deepEqual(c("Art.    Denominación    Cant.   Precio unit.   Dcto.   % IVA   Importe"), ["referencia", "descripcion", "cantidad", "precio", "dto", "tipo", "importe"]);
+  assert.deepEqual(c("Código    Descripción    Cajas    Ctd. Total    Precio    Prom    Dto %    Importe %IVA"),
+    ["referencia", "descripcion", "ignorar", "cantidad", "precio", "ignorar", "dto", "importe", "tipo"]);
+  assert.deepEqual(c("Cod.    Desc.    U/V    U/C PRECIO    Suma"), ["referencia", "descripcion", "cantidad", "ignorar", "precio", "importe"]);
+  assert.deepEqual(c("Producto   Kg   €/kg   Imp."), ["descripcion", "kilos", "precio_kilo", "importe"]);
+  assert.equal(c("CEBOLLA TUBO    1,50"), null);   // una línea de producto no es una cabecera
+});
+
+test("factura con columnas abreviadas: cada número va a su columna", () => {
+  const texto = `SUMINISTROS GARCIA S.L.\nC.I.F.: B12345674\nFra. nº: A-2026/77\nFec.: 03/04/2026\nVto.: 03/05/2026\n` +
+    `Cli.: TALLERES RUIZ\nN.I.F.: 12345678Z\n` +
+    `Cód.    Desc.                     Ctd.     P.U.     Dto.     Imp.\n` +
+    `A12     Tornillos M6              10       0,50     10       4,50\n` +
+    `B7      Arandelas                 100      0,05              5,00\n` +
+    `C3      Llave inglesa             1        12,00             12,00\n` +
+    `B.I.    21,50\nCuota IVA 21%    4,52\nRec. Eq. 5,2%    1,12\nRet. IRPF 15%    3,23\nTot. fra.    23,91\nF. pago: Transf. bancaria\n`;
+  const d = R.extraer(texto, { cabecera: ["numero_factura", "fecha", "vencimiento", "emisor_nif", "cliente_nombre", "cliente_nif",
+    "base_imponible", "tipo_iva", "cuota_iva", "recargo_equivalencia", "irpf", "total", "forma_pago"],
+    linea: ["referencia", "descripcion", "cantidad", "precio_unitario", "importe"] });
+  assert.deepEqual([d.numero_factura, d.fecha, d.vencimiento, d.emisor_nif, d.cliente_nombre, d.cliente_nif],
+    ["A-2026/77", "2026-04-03", "2026-05-03", "B12345674", "TALLERES RUIZ", "12345678Z"]);
+  assert.deepEqual([d.base_imponible, d.tipo_iva, d.cuota_iva, d.recargo_equivalencia, d.irpf, d.total, d.forma_pago],
+    [21.5, "21", 4.52, 1.12, 3.23, 23.91, "Transferencia"]);
+  assert.deepEqual(d.lineas.map((l) => [l.referencia, l.descripcion, l.cantidad, l.precio_unitario, l.importe]), [
+    ["A12", "Tornillos M6", 10, 0.5, 4.5], ["B7", "Arandelas", 100, 0.05, 5], ["C3", "Llave inglesa", 1, 12, 12]]);
+});
+
+test("columnas: con huecos vacíos y el %IVA al final", () => {
+  const texto = `Código    Descripción    Cajas    Ctd. Total    Precio    Prom    Dto %    Importe %IVA\n` +
+    `340069480 *BIT TEX MEX 074 - 1E    -8    0,740    -5,92    10,0\n` +
+    `340070547 *DOR CHI 099 - 1.70E    -5    1,290    -6,45    10,0\n`;
+  const ls = R.buscarProductos(texto.split("\n"));
+  assert.deepEqual(ls.map((l) => [l.cantidad, l.precio, l.importe, l.tipo_iva]), [[-8, 0.74, -5.92, 10], [-5, 1.29, -6.45, 10]]);
+});
+
+test("etiquetas abreviadas del resumen en tabla", () => {
+  const texto = `Fact. 15/2026\nB. Imp.    % IVA    Cuota    Total\n100,00    21    21,00    121,00\n`;
+  const d = R.extraer(texto + "\nTALLER S.L.\nCIF B12345674\n", { cabecera: ["numero_factura", "base_imponible", "tipo_iva", "cuota_iva", "total"], linea: [] });
+  assert.deepEqual([d.numero_factura, d.base_imponible, d.tipo_iva, d.cuota_iva, d.total], ["15/2026", 100, "21", 21, 121]);
+});
+
+test("tabla de totales con títulos abreviados", () => {
+  const texto = `TALLER S.L.\nCIF B12345674\nFact. 9/2026\nB.I.    % IVA    Cuota    % R.E.    R.E.    Ret.    Tot.\n200,00    21    42,00    5,2    10,40    30,00    222,40\n`;
+  const d = R.extraer(texto, { cabecera: ["base_imponible", "tipo_iva", "cuota_iva", "recargo_equivalencia", "irpf", "total"], linea: [] });
+  assert.deepEqual([d.base_imponible, d.tipo_iva, d.cuota_iva, d.recargo_equivalencia, d.irpf, d.total], [200, "21", 42, 10.4, 30, 222.4]);
+});
