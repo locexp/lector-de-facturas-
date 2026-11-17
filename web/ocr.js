@@ -121,6 +121,8 @@
       const x = it.transform[4], y = it.transform[5], alto = Math.abs(it.transform[3]) || 10;
       let f = filas.find((r) => Math.abs(r.y - y) < alto * 0.5);
       if (!f) filas.push(f = { y, trozos: [] });
+      // algunos PDF repiten cada texto encima de sí mismo (efecto negrita): "SubtotalSubtotal"
+      if (f.trozos.some((o) => o.str === it.str && Math.abs(o.x - x) < alto * 0.6)) continue;
       f.trozos.push({ x, fin: x + (it.width || 0), str: it.str, alto });
     }
     return filas.sort((a, b) => b.y - a.y).map((f) => {

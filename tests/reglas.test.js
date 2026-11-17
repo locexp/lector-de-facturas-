@@ -285,3 +285,58 @@ test("basura del OCR en las columnas de números", () => {
   assert.deepEqual(ls.map((l) => [l.referencia, l.descripcion, l.importe, l.revisar]),
     [["B-204", "Tornillo modelo M5", 3.25, false], ["B-205", "Tornillo modelo M6", null, true]]);
 });
+
+// Pro-forma en PDF de un usuario (texto tal como lo da pdf.js, ya sin duplicados).
+const PROFORMA = `(LOCT. EXPRESS) CARLOS ENRIQUE
+TORREZGALVEZ
+C/SAN ANTONIO ABAD Nº 6 ESQ. A
+41014 Sevilla
+España
+NIF: 78105855V
+Factura Pro-Forma # PV/2025/01517
+Fecha orden:    Comercial:
+15/01/2025 13:06:49    LOURDES CARBONERO PACHECO
+Precio
+Descripción    Cantidad    unitario    Impuestos Importe
+[MB670] CHORIZO X 5 SANTA ROSANO X 10 caja    7,0000    5,3900    10% 37,73 €
+Und
+[0360] THIERE KUMBA COUSCOUS MIL 500g    8,0000    1,6200    10% 12,96 €
+Und
+[DOS011] PANELA FRACCIONADA DORADO 454 g X    3,0000    1,4300    10%    4,29 €
+24    Und
+[DOS002] PLATANITOS CHILE LIMON 100g X 30    15,0000    0,8400    10% 12,60 €
+DORADO    Und
+[212] DISPLEY ALFAJOR NEGRO X 24 MARDEL    1,0000 Und    16,3000    10% 16,30 €
+[390-301 00] CLUB ROJITA GRANDE 2LT X 6    1,0000 Und    13,9600    IVA 21% 13,96 €
+(Bienes)
+[010002] LATA GUARANA X 24 ( ANTARTICA)    1,0000 Und    14,4000    IVA 21% 14,40 €
+(Bienes)
+[DOS000] PLATANITOS SAL DORADO 100g X 30 UNI    15,0000    0,8400    10% 12,60 €
+Und
+Subtotal    124,84 €
+IVA 10%    9,65 €
+IVA 21%    5,95 €
+Total    140,44 €
+ENVIAR BUÑUELO CONGELADO (2)
+DESCUENTO PAPA RELLENA
+Plazo de pago: Pago inmediato
+ 954876066 - 649402070  INFO@MIBODEGUITA.ES  https://WWW.MIBODEGUITA.ES`;
+
+test("pro-forma en PDF: 8 líneas, IVA 10 y 21 %, subtotal como base", () => {
+  const d = R.extraer(PROFORMA, TODO);
+  assert.equal(d.numero_factura, "PV/2025/01517");
+  assert.equal(d.fecha, "2025-01-15");
+  assert.deepEqual([d.base_imponible, d.tipo_iva, d.cuota_iva, d.total], [124.84, "10 / 21", 15.6, 140.44]);
+  assert.deepEqual(d.lineas.map((l) => [l.referencia, l.descripcion, l.cantidad, l.precio_unitario, l.tipo_iva, l.importe, l.importe_iva]), [
+    ["MB670", "CHORIZO X 5 SANTA ROSANO X 10 caja", 7, 5.39, 10, 37.73, 41.5],
+    ["0360", "THIERE KUMBA COUSCOUS MIL 500g", 8, 1.62, 10, 12.96, 14.26],
+    ["DOS011", "PANELA FRACCIONADA DORADO 454 g X 24", 3, 1.43, 10, 4.29, 4.72],
+    ["DOS002", "PLATANITOS CHILE LIMON 100g X 30 DORADO", 15, 0.84, 10, 12.6, 13.86],
+    ["212", "DISPLEY ALFAJOR NEGRO X 24 MARDEL", 1, 16.3, 10, 16.3, 17.93],
+    ["390-301 00", "CLUB ROJITA GRANDE 2LT X 6", 1, 13.96, 21, 13.96, 16.89],
+    ["010002", "LATA GUARANA X 24 ( ANTARTICA)", 1, 14.4, 21, 14.4, 17.42],
+    ["DOS000", "PLATANITOS SAL DORADO 100g X 30 UNI", 15, 0.84, 10, 12.6, 13.86],
+  ]);
+  assert.ok(d.avisos.some((a) => /Solo aparece un NIF/.test(a)), d.avisos.join(" | "));
+  assert.ok(!d.avisos.some((a) => /no cuadra|Revisa|no coincide/.test(a)), d.avisos.join(" | "));
+});

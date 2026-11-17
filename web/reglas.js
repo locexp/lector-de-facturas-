@@ -191,7 +191,7 @@
 
   function numeroFactura(lineas) {
     const res = [
-      /(?:factura|fra\.?|ticket|tique|recibo|albaran|n[º°o]\.?\s*(?:de\s*)?(?:factura|documento|doc\.?)|documento)\s*(?:simplificada\s*)?(?:n\s?[º°o*?.]*(?:\d(?=\s*[:#]))?|num\.?|numero|nro\.?|#)?\s*[:.#]?\s*([A-Z0-9][A-Z0-9\-\/.]*\d[A-Z0-9\-\/]*)/i,
+      /(?:factura|fra\.?|ticket|tique|recibo|albaran|n[º°o]\.?\s*(?:de\s*)?(?:factura|documento|doc\.?)|documento)\s*(?:(?:simplificada|pro-?\s?forma|rectificativa|proforma)\s*)?(?:n\s?[º°o*?.]*(?:\d(?=\s*[:#]))?|num\.?|numero|nro\.?|#)?\s*[:.#]?\s*([A-Z0-9][A-Z0-9\-\/.]*\d[A-Z0-9\-\/]*)/i,
       /^\s*(?:n[º°o*?]\.?|num\.?|numero|nro\.?)\s*[:#]?\s*([A-Z0-9][A-Z0-9\-\/.]*\d[A-Z0-9\-\/]*)/i,
     ];
     for (const re of res) {
@@ -218,6 +218,8 @@
       .replace(/\s*(N\.?I\.?F|C\.?I\.?F|NIF|CIF)\b.*$/i, "").replace(/\s{2,}/g, " ").replace(/[\s,;:]+$/, "").trim() || null;
   }
 
+  const iniClienteTmp = (p) => p.findIndex((l) => K.cliente.test(l));
+
   function cabecera(lineas, avisos) {
     const d = {};
     const p = lineas.map(plano);
@@ -230,6 +232,8 @@
     let emi = validos.find((n) => n !== cli && !esCliente(n));
     if (!cli && emi) cli = validos.find((n) => n !== emi);
     d.emisor_nif = emi ? emi.valor : null;
+    if (emi && validos.length === 1 && iniClienteTmp(p) < 0 && !nombreCerca(lineas, emi.linea - 7, emi.linea + 3))
+      avisos.push(`Solo aparece un NIF (${emi.valor}) y no se sabe si es del emisor o del cliente: revísalo.`);
     d.cliente_nif = cli ? cli.valor : null;
     nifs.filter((n) => !n.valido).forEach((n) =>
       avisos.push(`Parece un NIF/CIF (${n.valor}) pero su letra de control no es válida; puede estar mal leído.`));
@@ -287,13 +291,14 @@
     const totales = sumaClave(K.total, K.noTotal);
     d.total = totales.length ? Math.max(...totales) : null;
 
-    const bases = sumaClave(K.base);
+    let bases = sumaClave(K.base);
+    if (!bases.length) bases = sumaClave(/\bsub-?\s?total\b/);   // "Subtotal" = base cuando no pone "Base imponible"
     const totalBase = p.findIndex((l) => /\b(total base|base imponible total|suma bases|total b\.? ?imp)/.test(l));
     d.base_imponible = totalBase >= 0 ? importeTrasClave(lineas, totalBase)
       : bases.length ? red2([...new Set(bases)].reduce((a, b) => a + b, 0)) : null;
 
     // Cuota de IVA: "Total IVA" o la suma de las líneas "IVA xx%"
-    const lineasIva = p.map((l, i) => i).filter((i) => K.iva.test(p[i]) && !/\b(incluido|incl\.?|inc\.)\b/.test(p[i]) &&
+    const lineasIva = p.map((l, i) => i).filter((i) => K.iva.test(p[i]) && !lineaProducto(lineas[i]) && !/\b(incluido|incl\.?|inc\.)\b/.test(p[i]) &&
       !K.base.test(p[i].replace(/\b(cuota|iva)\b.*$/, "")) && !/\bnif|cif\b/.test(p[i]));
     const totalIva = lineasIva.find((i) => /\b(total|cuota total|total cuota)\b/.test(p[i]));
     if (totalIva !== undefined) d.cuota_iva = importeTrasClave(lineas, totalIva, /\b(cuota|i\.?v\.?a\.?)\b/);
@@ -301,7 +306,7 @@
       const vals = lineasIva.map((i) => importeTrasClave(lineas, i, /\bcuota\b/.test(p[i]) ? /\bcuota\b/ : null)).filter((v) => v !== null);
       d.cuota_iva = vals.length ? red2([...new Set(vals)].reduce((a, b) => a + b, 0)) : null;
     }
-    const tipos = [...new Set(p.filter((l) => K.iva.test(l) || /\btipo\b/.test(l)).flatMap(porcentajes))];
+    const tipos = [...new Set(p.filter((l) => K.iva.test(l) || /\btipo\b/.test(l)).flatMap(porcentajes))];   // incluye "IVA 21%" de las líneas
     d.tipo_iva = tipos.length ? tipos.sort((a, b) => a - b).map((t) => String(t).replace(".", ",")).join(" / ") : null;
 
     const uno = (re) => { const v = sumaClave(re); return v.length ? v[v.length - 1] : null; };
@@ -365,7 +370,7 @@
     "euro euros articulos articulo unidades uds lineas items impuesto impuestos exento exenta incluido incl " +
     "descuento descuentos dto ahorro ahorrado puntos tipo neto bruto liquido ref referencia descripcion concepto " +
     "conceptos cant cantidad precio precios unidad unitario unit pvp calle avda avenida plaza paseo ctra carretera " +
-    "und lote caducidad cad dtos lineas peso kg transportista agente zona albaran pedido cajero cajera atendido vendedor tienda caja establecimiento observaciones notas registro mercantil tomo folio hoja"
+    "bienes servicios orden comercial plazo und lote caducidad cad dtos lineas peso kg transportista agente zona albaran pedido cajero cajera atendido vendedor tienda caja establecimiento observaciones notas registro mercantil tomo folio hoja"
   ).split(" "));
   const PALABRAS_VACIAS = new Set("por para del las los con sin que una uno sus les nos ese esa este esta".split(" "));
 
@@ -412,6 +417,8 @@
     if (!/[a-zñ]{3,}/i.test(l) || /@|www\.|https?:/i.test(l)) return null;
     const limpia = l.replace(/\s*€\s*/g, "  ").replace(/\s+[A-E]\s*$/, "")   // códigos de IVA tipo "A" al final
       .replace(/(\s\d+(?:[.,]\d+)?)\s+(?:und|uds|ud|un|u|cjs?)\.?(?=\s|$)/gi, "$1")   // "1,0000 Und" -> "1,0000"
+      .replace(/\b(?:iva|igic|ipsi)\s+(?=\d{1,2}(?:[.,]\d+)?\s*%)/gi, "")                  // "IVA 21%" -> "21%"
+      .replace(/\s*\((?:bienes|servicios)\)/gi, "")
       .replace(/\s(?:(?=\S*[=—_;|~])[=\-—_:;|.,'"~]+|[-.,:]{2,})(?=\s|$)/g, " ")   // "==", "-=-": manchas leídas como signos
       .replace(/(\s\d{1,4})-(\d{2})(?=\s|$)/g, "$1,$2")              // "3-75": coma leída como guion
       .trimEnd();
@@ -436,8 +443,10 @@
     let cantidad = null, referencia = null;
     const q = resto.match(/^(\d+(?:[.,]\d{1,3})?)\s*(?:x|uds?\.?|u\.|ud\.|kg|und\.?)?\s+(?=\D)/i);
     if (q) { cantidad = parsearImporte(q[1]); resto = resto.slice(q[0].length); }
-    // código de artículo al principio: "TOR-440", "GR-2910201", "BE - BE0012-C545"
-    const r = resto.match(/^([A-Z0-9]{1,6}(?:\s?[-\/]\s?[A-Z0-9]+)+|[A-Z0-9][A-Z0-9\-.\/]{3,})\s+(?=[A-Za-zÁÉÍÓÚÑáéíóúñ])/i);
+    // código de artículo al principio: "[MB670]", "TOR-440", "GR-2910201", "BE - BE0012-C545"
+    const rc = resto.match(/^\[([^\]]{1,20})\]\s*/);
+    if (rc) { referencia = rc[1].trim(); resto = resto.slice(rc[0].length); }
+    const r = rc ? null : resto.match(/^([A-Z0-9]{1,6}(?:\s?[-\/]\s?[A-Z0-9]+)+|[A-Z0-9][A-Z0-9\-.\/]{3,})\s+(?=[A-Za-zÁÉÍÓÚÑáéíóúñ])/i);
     if (r && /\d/.test(r[1])) { referencia = r[1]; resto = resto.slice(r[0].length); }
     // "2 x 1,05" dentro de la descripción
     const x = resto.match(/\s(\d+(?:[.,]\d{1,3})?)\s*[xX*]\s*$/);
@@ -529,7 +538,8 @@
     for (const l of lineasTexto) {
       const prod = lineaProducto(l);
       if (prod) { res.push(prod); ultimo = prod; extra = 0; continue; }
-      const t = l.trim();
+      const t = l.trim().replace(/(^|\s)(?:und|uds|ud)\.?(?=\s|$)/gi, " ").trim();
+      if (ultimo && /^\d{1,4}$/.test(t) && /\s[xX]$/.test(ultimo.descripcion)) { ultimo.descripcion += " " + t; continue; }   // "… X" + "24"
       const conCodigo = RE_CODIGO.test(t) && /[a-zñ]{3,}/i.test(t);
       if (conCodigo && res.length && /\d/.test(t.replace(RE_CODIGO, ""))) {
         // fila de la tabla que no se ha podido interpretar: se añade para revisar a mano
