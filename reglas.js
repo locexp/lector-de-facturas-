@@ -144,21 +144,115 @@
 
   // ---------- palabras clave ----------
   const K = {
-    cliente: /\b(cliente|destinatario|facturar a|datos del cliente|comprador|receptor|sr\.?|sra\.?)\b/,
+    cliente: /\b(cliente|destinatario|facturar a|datos del cliente|comprador|receptor|sr\.?|sra\.?)\b|\bcli[.:]|\bdest[.:]/,
     emisor: /\b(emisor|proveedor|vendedor)\b/,
-    total: /\b(total|importe total|a pagar|total factura|liquido)\b/,
+    total: /\b(total|importe total|a pagar|total factura|liquido)\b|\btot\.|\bimp\.? total\b/,
     noTotal: /\b(subtotal|sub-total|total base|total b\.?\s?i\.?|base|total iva|total impuestos|total cuota|total dto|total descuento|total lineas?|total articulos|total unidades|total uds|total items)\b/,
-    base: /\b(base imponible|base imp\.?|b\. ?imponible|total b\.?\s?i|base)\b/,
+    base: /\b(base imponible|base imp\.?|b\. ?imponible|total b\.?\s?i|base)\b|\bb\.\s?i\.|\bb\.\s?imp\b/,
     iva: /\b(i\.?v\.?a\.?|cuota)\b/,
-    recargo: /\b(recargo|r\.? ?e\.? )\b/,
-    irpf: /\b(irpf|retencion)\b/,
-    descuento: /\b(descuento|dto\.?)\b/,
+    recargo: /\b(recargo|r\.? ?e\.? )\b|\brec\.\s?eq|\brec\.|\br\.\s?e\.|\breq\b/,
+    irpf: /\b(irpf|retencion)\b|\bret\./,
+    descuento: /\b(descuento|dto\.?|dcto\.?|bonif\.?|bonificacion)\b/,
     nombreEmpresa: /\b(s\.?\s?[li1]\.?\s?u?\.?|s\.?\s?a\.?\s?u?\.?|s\.?\s?coop\.?|s\.?\s?l\.?\s?l\.?|c\.?\s?b\.?|sociedad|slne)$/,
     direccion: /(^|[^a-z])(c\/|calle|avda|avenida|av\.|plaza|pza|paseo|ctra|carretera|camino|ronda|poligono|pol\.|travesia|urb\.)(?![a-z])|\b\d{5}\b/,
   };
 
+  // ---------- diccionario de nombres de columnas y etiquetas (completos y abreviados) ----------
+  // Se comparan en minúsculas, sin tildes, sin puntos y sin dos puntos: "Cód." = "cod", "P.U." = "pu".
+  const COLUMNAS = {
+    referencia: ["codigo", "cod", "ref", "referencia", "art", "articulo", "ean", "sku", "n art", "num art", "cod art"],
+    descripcion: ["descripcion", "desc", "descrip", "descr", "concepto", "concep", "conc", "denominacion", "denom",
+      "detalle", "producto", "prod", "designacion", "descripcion articulo", "nombre"],
+    cantidad: ["cantidad", "cant", "ctd", "ctdad", "cdad", "ctd total", "cant total", "uds", "ud", "u", "und", "unid",
+      "unidades", "u/v", "uv", "qty", "piezas", "pzas", "bultos", "n uds", "n unid"],
+    kilos: ["kg", "kgs", "kilos", "peso", "peso kg", "kg neto", "peso neto"],
+    precio_kilo: ["€/kg", "eur/kg", "precio kg", "precio/kg", "p/kg", "€ kg", "pvp kg", "precio €/kg"],
+    precio: ["precio", "pvp", "pu", "p/u", "p u", "p unit", "p unitario", "precio unit", "precio unitario", "pr unit",
+      "precio ud", "precio und", "€/u", "precio €/u", "p ud", "tarifa", "unitario", "importe unit", "precio €", "precio neto"],
+    dto: ["dto", "dto %", "% dto", "%dto", "dtos", "%dtos", "% dtos", "dcto", "dcto %", "descuento", "desc %", "% desc",
+      "bonif", "dto1", "dto 1", "%dto1"],
+    tipo: ["% iva", "%iva", "iva %", "iva", "tipo", "tipo iva", "t iva", "% i v a", "impuestos", "imp %", "% imp", "igic", "% igic"],
+    importe: ["importe", "imp", "total", "total linea", "subtotal", "suma", "neto", "valor", "importe neto", "base",
+      "base imp", "importe €", "total €", "imp €", "total sin iva", "importe sin iva", "total neto", "imp (€)", "importe (€)"],
+    lote: ["lote", "lot", "n lote"],
+    caducidad: ["caducidad", "cad", "f cad", "fecha cad", "consumo pref", "cons pref"],
+    ignorar: ["cajas", "caja", "u/c", "uc", "prom", "promo", "promocion", "envase", "formato", "unid caja", "uds caja",
+      "almacen", "alm", "ubicacion", "iva incl"],
+  };
+  const DICC_COLUMNAS = new Map(Object.entries(COLUMNAS).flatMap(([k, vs]) => vs.map((v) => [v, k])));
+  const normEtiqueta = (t) => plano(t).replace(/\(\s*[€e]\s*\)/g, " ").replace(/[.:,]/g, " ").replace(/\s+/g, " ").trim();
+
+  /** "Cód.  Desc.  Ctd.  P.U.  Dto.  Imp." -> ["referencia", "descripcion", "cantidad", "precio", "dto", "importe"],
+   *  o null si la línea no es una cabecera de tabla de productos. */
+  function columnasTabla(linea) {
+    if (importes(linea).length || /\d{2,}/.test(linea.replace(/dto\s?\d|%/gi, ""))) return null;
+    const res = [];
+    let desconocidas = 0;
+    for (const trozo of linea.trim().split(/\s{2,}/)) {
+      const pal = trozo.split(/\s+/);
+      for (let i = 0; i < pal.length;) {
+        let j = Math.min(pal.length, i + 3), k = null;
+        for (; j > i; j--) { k = DICC_COLUMNAS.get(normEtiqueta(pal.slice(i, j).join(" "))); if (k) break; }
+        if (k) { res.push(k); i = j; } else { if (normEtiqueta(pal[i])) desconocidas++; i++; }
+      }
+    }
+    const ok = res.length >= 3 && desconocidas <= 1 && (res.includes("descripcion") || res.includes("referencia")) &&
+      (res.includes("importe") || res.includes("precio"));
+    return ok ? res : null;
+  }
+
+  // Títulos de la tabla de totales (resumen de impuestos)
+  const RESUMEN = new Map(Object.entries({
+    base: ["base", "base imponible", "base imp", "b imp", "b i", "bi", "total b i", "total bi", "b imponible",
+      "importe neto", "neto", "subtotal", "total neto", "base €"],
+    tipo: ["% iva", "%iva", "iva %", "tipo", "tipo iva", "%", "% igic", "%igic"],
+    cuota: ["iva", "cuota", "cuota iva", "i v a", "imp iva", "importe iva", "total iva", "cuota €", "igic", "cuota igic"],
+    prec: ["% rec", "%rec", "% re", "%re", "% r e", "%r e", "% req", "%req", "yrec", "tipo rec", "% rec eq"],
+    rec: ["rec", "recargo", "r e", "rec eq", "req", "recargo eq", "importe rec", "cuota rec", "cuota re"],
+    irpf: ["irpf", "ret", "retencion", "ret irpf", "cuota irpf"],
+    dto: ["dto", "descuento", "imp dto", "dcto", "% dto", "%dto", "dto pp"],
+    total: ["total", "total factura", "tot", "tot fra", "total fra", "importe total", "a pagar", "total a pagar",
+      "liquido", "total €", "total eur"],
+  }).flatMap(([k, vs]) => vs.map((v) => [v, k])));
+
+  const NO_NUMERICAS = new Set(["referencia", "descripcion", "lote", "caducidad"]);
+
+  /** Con las columnas de la cabecera, asigna cada número de la línea a su columna. Las columnas
+   *  vacías se saltan: se prueban todas las formas de repartir los números (en orden) y se queda
+   *  la que cuadra (cantidad x precio - dto = importe, % de IVA válido...). */
+  function asignarColumnas(nums, columnas, tipoLeido) {
+    let cols = columnas.filter((c) => !NO_NUMERICAS.has(c));
+    if (tipoLeido !== null) { const i = cols.lastIndexOf("tipo"); if (i >= 0) cols = cols.filter((_, k) => k !== i); }
+    const n = cols.length, k = nums.length;
+    if (!k || k > n || n > 12) return null;
+    let mejor = null;
+    const prueba = (pos) => {
+      const a = {};
+      pos.forEach((c, i) => { a[cols[c]] = nums[i]; });
+      if (a.importe === undefined) return;
+      let s = k === n ? 0.5 : 0;
+      const q = a.cantidad, p = a.precio, d = a.dto, imp = a.importe;
+      if (q !== undefined && p !== undefined) {
+        const bruto = q * p * (d ? 1 - d / 100 : 1);
+        s += cerca(bruto, imp, 0.021 + Math.abs(q) * 0.00006) || (d && cerca(q * p - d, imp, 0.021)) ? 6 : -2;
+      } else if (p !== undefined) s += cerca(p, imp, 0.011) ? 3 : -1;
+      if (a.kilos !== undefined && a.precio_kilo !== undefined) s += cerca(red2(a.kilos * a.precio_kilo), imp, 0.011) ? 6 : -2;
+      if (a.tipo !== undefined) s += TIPOS_IVA.includes(a.tipo) ? 1 : -6;
+      if (d !== undefined) s += d >= 0 && d < 100 ? 0.3 : -6;
+      s -= cols.filter((c, i) => !pos.includes(i) && ["cantidad", "precio", "importe"].includes(c)).length * 0.2;
+      if (!mejor || s > mejor.s) mejor = { s, a };
+    };
+    const rec = (ini, pos) => {
+      if (pos.length === k) return prueba(pos);
+      for (let c = ini; c <= n - (k - pos.length); c++) rec(c + 1, [...pos, c]);
+    };
+    rec(0, []);
+    if (!mejor || mejor.s < (k === n ? 0 : 3)) return null;
+    return mejor.a;
+  }
+
   const FORMAS_PAGO = [
-    [/\btransferencia\b/, "Transferencia"], [/\bdomiciliaci[oó]n|recibo domiciliado|adeudo\b/, "Domiciliación"],
+    [/\btransferencia\b|\btransf\b|\btrans\.\s?banc/, "Transferencia"], [/\bdomiciliaci[oó]n|recibo domiciliado|adeudo\b/, "Domiciliación"],
     [/\bbizum\b/, "Bizum"], [/\bpaypal\b/, "PayPal"], [/\bpagare\b/, "Pagaré"], [/\bcheque\b/, "Cheque"],
     [/\btarjeta|visa|mastercard|maestro|amex|contactless|datafono\b/, "Tarjeta"],
     [/\befectivo|contado|metalico\b/, "Efectivo"],
@@ -200,7 +294,7 @@
 
   function numeroFactura(lineas) {
     const res = [
-      /(?:[fh]a[cl]?tura|fra\.?|ticket|tique|recibo|albaran|n[º°o]\.?\s*(?:de\s*)?(?:factura|documento|doc\.?)|documento)\s*(?:(?:simplificada|pro-?\s?forma|rectificativa|proforma)\s*)?(?:n\s?[º°o*?.]*(?:\d(?=\s*[:#]))?|num\.?|numero|nro\.?|#)?\s*[:.#]?\s*([A-Z0-9][A-Z0-9\-\/.]*\d[A-Z0-9\-\/]*)/i,
+      /(?:[fh]a[cl]?tura|fact\.?|fra\.?|ticket|tique|recibo|albaran|n[º°o]\.?\s*(?:de\s*)?(?:factura|documento|doc\.?)|documento)\s*(?:(?:simplificada|pro-?\s?forma|rectificativa|proforma)\s*)?(?:n\s?[º°o*?.]*(?:\d(?=\s*[:#]))?|num\.?|numero|nro\.?|#)?\s*[:.#]?\s*([A-Z0-9][A-Z0-9\-\/.]*\d[A-Z0-9\-\/]*)/i,
       /^\s*(?:n[º°o*?]\.?|num\.?|numero|nro\.?)\s*[:#]?\s*([A-Z0-9][A-Z0-9\-\/.]*\d[A-Z0-9\-\/]*)/i,
     ];
     for (const re of res) {
@@ -267,7 +361,7 @@
       limpiarNombre(lineas.find((l, i) => i < finEmisor && /[a-zñ]{3,}/i.test(l) && !/:/.test(l) &&
         !/factura|ticket|tique|fecha|n[º°]|nif|cif|tel|@|www|albar/i.test(l)) || "");
     if (iniCliente >= 0) {
-      const enLinea = limpiarNombre(lineas[iniCliente].replace(/^.*?(cliente|destinatario|facturar a)\s*[:.]?/i, ""));
+      const enLinea = limpiarNombre(lineas[iniCliente].replace(/^.*?(cliente|destinatario|facturar a|\bcli\.|\bcli:|\bdest\.)\s*[:.]?/i, ""));
       d.cliente_nombre = (enLinea && /[a-z]{3,}/i.test(enLinea) ? enLinea : null) ||
         nombreCerca(lineas, iniCliente, iniCliente + 4) ||
         limpiarNombre(lineas.slice(iniCliente + 1, iniCliente + 3).find((l) => /[a-zñ]{3,}/i.test(l) && !K.direccion.test(plano(l))) || "");
@@ -286,10 +380,10 @@
     d.numero_factura = numeroFactura(lineas);
     let fecha = null, venc = null;
     lineas.forEach((l, i) => {
-      const f = fechaDe(l) || (/(fecha|venc)/.test(p[i]) && !fechaDe(l) && lineas[i + 1] ? fechaDe(lineas[i + 1]) : null);
+      const f = fechaDe(l) || (/(fecha|\bfec\b|venc|\bvto\b)/.test(p[i]) && !fechaDe(l) && lineas[i + 1] ? fechaDe(lineas[i + 1]) : null);
       if (!f) return;
-      if (/venc/.test(p[i])) venc = venc || f;
-      else if (/fecha/.test(p[i]) && !/fecha\s*(de\s*)?(venc|entrega|pedido|operacion)/.test(p[i])) fecha = fecha || f;
+      if (/venc|\bvto\b/.test(p[i])) venc = venc || f;
+      else if (/fecha|\bfec\b|\bf\.? ?(emision|fra|factura)\b/.test(p[i]) && !/fecha\s*(de\s*)?(venc|entrega|pedido|operacion)/.test(p[i])) fecha = fecha || f;
     });
     if (!fecha) fecha = lineas.map(fechaDe).find(Boolean) || null;
     d.fecha = fecha;
@@ -349,6 +443,8 @@
     // Tabla de impuestos en columnas: títulos "Base. | %IVA | IVA | %Rec. | Rec. | Imp." y debajo
     // los valores en el mismo orden (los ilegibles se ignoran)
     const clase = (t) => {
+      const n = normEtiqueta(t);
+      if (RESUMEN.has(n)) return RESUMEN.get(n);
       const x = plano(t).replace(/[^a-z%]/g, "");
       if (/^[%y]rec|^%re$|^tiporec/.test(x)) return "prec";
       if (/^%iva|^%$|^tipo/.test(x)) return "tipo";
@@ -373,6 +469,7 @@
         else if (c === "rec") d.recargo_equivalencia = v;
         else if (c === "prec") pRec = v;
         else if (c === "total" && d.total === null) d.total = v;
+        else if (c === "irpf") d.irpf = Math.abs(v);
       });
     });
     if (pRec && d.recargo_equivalencia === null && d.base_imponible !== null) {
@@ -470,6 +567,7 @@
     "euro euros articulos articulo unidades uds lineas items impuesto impuestos exento exenta incluido incl " +
     "descuento descuentos dto ahorro ahorrado puntos tipo neto bruto liquido ref referencia descripcion concepto " +
     "conceptos cant cantidad precio precios unidad unitario unit pvp calle avda avenida plaza paseo ctra carretera " +
+    "rec req ret tot fra fact imp desc cod ctd cdad dcto bonif vto venc fec cli dest transf banc pago b.i bi " +
     "cajas promos promo prom bienes servicios orden comercial plazo und lote caducidad cad dtos lineas peso kg transportista agente zona albaran pedido cajero cajera atendido vendedor tienda caja establecimiento observaciones notas registro mercantil tomo folio hoja"
   ).split(" "));
   const PALABRAS_VACIAS = new Set("por para del las los con sin que una uno sus les nos ese esa este esta".split(" "));
@@ -513,7 +611,7 @@
     return { nums, tipo, resto };
   }
 
-  function lineaProducto(l) {
+  function lineaProducto(l, columnas = null) {
     if (!/[a-zñ]{3,}/i.test(l) || /@|www\.|https?:/i.test(l)) return null;
     const limpia = l.replace(/\s*€\s*/g, "  ").replace(/\s+[A-E]\s*$/, "")   // códigos de IVA tipo "A" al final
       .replace(/(\s\d+[.,]\d+)\s+(?:und|uds|ud|un|u|cjs?)\.?(?=\s|$)/gi, "$1")   // "1,0000 Und" -> "1,0000" ("CAJA 15 UD" se queda)
@@ -547,13 +645,20 @@
     resto = resto.replace(/^(?:[A-Za-z]{1,2}|\S?[^\s\w]\S?)\s+(?=\d{4,}\s)/, "");
     const cod = resto.match(/^(\d{4,})\s+(?=[*A-Za-zÁÉÍÓÚÑ])/);
     if (cod) { referencia = cod[1]; resto = resto.slice(cod[0].length); }
-    const q = cod ? null : resto.match(/^(\d+(?:[.,]\d{1,3})?)\s*(?:x|uds?\.?|u\.|ud\.|kg|und\.?)?\s+(?=\D|\d+\s+[A-Za-zÁÉÍÓÚÑ])/i);
+    // si la tabla tiene columna de cantidad después de la descripción, un número al principio no es la cantidad
+    const qAlPrincipio = !columnas || !columnas.includes("cantidad") || columnas.indexOf("cantidad") < columnas.indexOf("descripcion");
+    const q = cod || !qAlPrincipio ? null : resto.match(/^(\d+(?:[.,]\d{1,3})?)\s*(?:x|uds?\.?|u\.|ud\.|kg|und\.?)?\s+(?=\D|\d+\s+[A-Za-zÁÉÍÓÚÑ])/i);
     if (q) { cantidad = parsearImporte(q[1]); resto = resto.slice(q[0].length); }
     // código de artículo al principio: "[MB670]", "TOR-440", "GR-2910201", "BE - BE0012-C545"
     const rc = resto.match(/^\[([^\]]{1,20})\]\s*/);
     if (rc) { referencia = rc[1].trim(); resto = resto.slice(rc[0].length); }
     const r = rc ? null : resto.match(/^([A-Z0-9]{1,6}(?:\s?[-\/]\s?[A-Z0-9]+)+|[A-Z0-9][A-Z0-9\-.\/]{3,})\s+(?=[A-Za-zÁÉÍÓÚÑáéíóúñ])/i);
     if (r && /\d/.test(r[1])) { referencia = r[1]; resto = resto.slice(r[0].length); }
+    // con columnas: si la primera es el código, es el primer trozo separado por espacios ("A12     Tornillos M6")
+    if (!referencia && columnas && columnas[0] === "referencia") {
+      const t0 = resto.match(/^(\S{1,20})\s{2,}(?=\S)/);
+      if (t0) { referencia = t0[1]; resto = resto.slice(t0[0].length); }
+    }
     // "2 x 1,05" dentro de la descripción
     const x = resto.match(/\s(\d+(?:[.,]\d{1,3})?)\s*[xX*]\s*$/);
     if (x && cantidad === null) { cantidad = parsearImporte(x[1]); resto = resto.slice(0, x.index); }
@@ -568,9 +673,11 @@
     if (!/[a-zñ]{3,}/i.test(descripcion) || esResumen(descripcion)) return null;
     if (buscarNifs([descripcion]).some((n) => n.valido)) return null;   // datos del cliente/emisor
 
+    // con la cabecera de la tabla, cada número va a su columna
+    const asg = columnas && !importeIlegible ? asignarColumnas(nums.map((o) => o.n), columnas, tipo) : null;
     // última columna = % de IVA sin el símbolo ("… -6,45   10,0"): si con el penúltimo como importe
     // cuadra cantidad x precio (o es un importe con céntimos y el último no), el último es el tipo
-    if (!importeIlegible && nums.length >= 3 && tipo === null) {
+    if (!asg && !importeIlegible && nums.length >= 3 && tipo === null) {
       const ult = nums[nums.length - 1], pen = nums[nums.length - 2];
       const pareceTipo = TIPOS_IVA.includes(ult.n) && ult.n > 0;
       const resto2 = nums.slice(0, -2).map((o) => o.n);
@@ -582,7 +689,16 @@
     if (importeIlegible) v.push(null);
     let importe = v[v.length - 1];
     let precio = null, descuento = null, revisar = importeIlegible;
-    if (importeIlegible) {
+    let kilosCol = null, precioKiloCol = null;
+    if (asg) {
+      importe = asg.importe;
+      precio = asg.precio ?? (asg.precio_kilo === undefined ? null : asg.precio_kilo);
+      cantidad = asg.cantidad ?? asg.kilos ?? cantidad ?? (precio !== null ? 1 : null);
+      if (asg.tipo !== undefined) tipo = asg.tipo;
+      if (asg.dto && cantidad !== null && precio !== null) descuento = red2(cantidad * precio - importe);
+      if (asg.kilos !== undefined) kilosCol = asg.kilos;
+      if (asg.precio_kilo !== undefined) precioKiloCol = asg.precio_kilo;
+    } else if (importeIlegible) {
       precio = v[v.length - 2];
       if (cantidad === null) cantidad = v.length >= 3 ? v[v.length - 3] : 1;
       importe = red2(cantidad * precio);
@@ -629,6 +745,8 @@
     const solo = l.match(/(\d+[.,]\d{1,4})\s*[€e]?\s*\/\s*kg/i);
     if (pk) { kilos = parsearImporte(pk[1]); precioKilo = parsearImporte(pk[2]); }
     else if (solo) precioKilo = parsearImporte(solo[1]);
+    if (kilosCol !== null) kilos = kilosCol;
+    if (precioKiloCol !== null) precioKilo = precioKiloCol;
     return { descripcion, referencia, cantidad, precio, descuento, importe, tipo_iva: tipo, revisar, sinComa, kilos, precioKilo };
   }
 
@@ -668,7 +786,7 @@
    *  (descripciones partidas en dos o más renglones). */
   function buscarProductos(lineasTexto) {
     const res = [];
-    let ultimo = null, extra = 0, previa = null;
+    let ultimo = null, extra = 0, previa = null, columnas = null;
     const esPeso = (i) => RE_PESO.test(lineasTexto[i] || "");
     const esTique = lineasTexto.some((l) => /\b([fh]a[cl]?tura simplificada|ticket|tique)\b/i.test(quitarTildes(l)));
     for (let n = 0; n < lineasTexto.length; n++) {
@@ -697,7 +815,9 @@
           kilos: cantidad, precioKilo: precio };
         res.push(ultimo); extra = 0; previa = null; continue;
       }
-      const prod = lineaProducto(l);
+      const cols = columnasTabla(l);
+      if (cols) { columnas = cols; ultimo = null; previa = null; continue; }   // cabecera de la tabla
+      const prod = lineaProducto(l, columnas);
       // posible descripción de un producto al peso (la línea de los kg va debajo)
       previa = !prod && /[a-zñ]{3,}/i.test(l) && !importes(l).length && !esResumen(l) ? l.trim().replace(/(?:\s+[^\w\s]{1,2})+$/, "") : null;
       if (prod) { res.push(prod); ultimo = prod; extra = 0; continue; }
@@ -918,5 +1038,5 @@
     return salida;
   }
 
-  return { extraer, puntuar, renglonesOcr, parsearImporte, nifValido, ibanValido, importes, lineaProducto, buscarProductos, esResumen, fechaDe };
+  return { extraer, puntuar, renglonesOcr, columnasTabla, parsearImporte, nifValido, ibanValido, importes, lineaProducto, buscarProductos, esResumen, fechaDe };
 });
