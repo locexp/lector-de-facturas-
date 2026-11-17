@@ -439,3 +439,46 @@ test("recargo de equivalencia calculado con base x %Rec si no se lee", () => {
   assert.equal(d.recargo_equivalencia, 0.25);
   assert.ok(!d.avisos.some((a) => /no coincide/.test(a)), d.avisos.join(" | "));
 });
+
+// Abono de un distribuidor (foto de un usuario): importes negativos, código de 9 cifras,
+// columna %IVA sin símbolo, importe mal leído ("5" por "-5,92") y la tabla de totales ilegible.
+const ABONO = `S.L-
+NO: 25192    NAVE 3
+L CRUCE,
+ALCALA DE GUADA    re
+Cif: 891793059 - Tfno: 621.62.41 g
+Cliente    LOCUTORIO EXPRESS
+Fecha: 17-10-2026
+001140    CARLOS ENRIQUE TORRES GALVEZ    Agente: MIGUEL
+78105855v    Repartidor: BONI CUETO RODRIGUEZ
+PLAZA FERNANDO VI, S/N    Tfno cliente: 620394424
+     41014 - BELLAVISTA    Página: 1/1
+Código    Descripción    Cajas    Ctd.    Precio    Prom    Pto    Importe %IVA
+Caducado
+340069480 *BIT TEX MEX 074 - 1E    -8    0,740    5
+340070547 *DOR CHI 099 - 1.70E    -5    1,290    -6,45    10,0
+Total Cajas: O    Total Unidades: -13    Total Promos: 0    Total Dtos Lineas: O,
+P.Verde 10%: -0,04 €
+Base Imp.    “%IVA
+     Total B.I.    % Dto    12/42    10
+-12,42
+Forma de Pago: Contado Ter    0154711`;
+
+test("abono con importes negativos y totales calculados", () => {
+  const d = R.extraer(ABONO, TODO);
+  assert.deepEqual([d.numero_factura, d.fecha, d.emisor_nif, d.cliente_nombre, d.cliente_nif, d.forma_pago],
+    ["25192", "2026-10-17", "B91793059", "LOCUTORIO EXPRESS", "78105855V", "Efectivo"]);
+  assert.deepEqual([d.base_imponible, d.tipo_iva, d.cuota_iva, d.total], [-12.42, "10", -1.24, -13.66]);
+  assert.deepEqual(d.lineas.map((l) => [l.referencia, l.descripcion, l.cantidad, l.precio_unitario, l.importe]), [
+    ["340069480", "*BIT TEX MEX 074 - 1E", -8, 0.74, -5.92],
+    ["340070547", "*DOR CHI 099 - 1.70E", -5, 1.29, -6.45],
+    [null, "P.Verde 10%", 1, -0.04, -0.04],
+  ]);
+});
+
+test("marcas del margen delante del código de artículo", () => {
+  for (const pre of ["EA ", "=1 ", "S ", ""]) {
+    const l = R.lineaProducto(`${pre}340070547 *DOR CHI 099 - 1.70E    -5    1,290    -6,45    10,0`);
+    assert.deepEqual([l.referencia, l.descripcion, l.cantidad, l.importe, l.tipo_iva], ["340070547", "*DOR CHI 099 - 1.70E", -5, -6.45, 10]);
+  }
+});
