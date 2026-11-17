@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f5f9a">
-<link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" href="/static/icono.svg">
-<link rel="apple-touch-icon" href="/static/icono.svg">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icono.svg">
+<link rel="apple-touch-icon" href="icono.svg">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Lector de facturas</title>
 <style>
@@ -74,7 +74,7 @@
   .barra-res { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
   .barra-res .boton { flex: 1 1 40%; }
   .factura header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
-  .factura header strong { font-size: 1rem; }
+  .factura header strong { font-size: 1rem; flex: 1; }
   .datos { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 12px; }
   .datos label { display: block; font-size: .78rem; color: var(--suave); }
   input.campo {
@@ -89,15 +89,22 @@
   td input.campo { margin: 0; min-width: 80px; padding: 5px 6px; font-size: .88rem; }
   td.desc input.campo { min-width: 180px; }
   .vacio-res { color: var(--suave); text-align: center; padding: 8px; }
-  #aviso-clave { display: none; }
+  .modo { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--fondo); padding: 4px; border-radius: 12px; margin-top: 12px; }
+  .modo button { border: 0; background: transparent; color: var(--suave); font: inherit; padding: 9px 6px; border-radius: 9px; cursor: pointer; line-height: 1.25; }
+  .modo button b { display: block; font-size: .95rem; }
+  .modo button small { font-size: .78rem; }
+  .modo button.activo { background: var(--tarjeta); color: var(--texto); box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+  .modo button:disabled { opacity: .45; cursor: default; }
+  .etiqueta { font-size: .72rem; font-weight: 700; padding: 2px 7px; border-radius: 999px; background: var(--acento-suave); color: var(--acento); white-space: nowrap; }
+  #estado { color: var(--suave); font-size: .85rem; margin-top: 8px; min-height: 1.2em; }
+  details.texto { margin-top: 10px; font-size: .85rem; color: var(--suave); }
+  details.texto pre { white-space: pre-wrap; word-break: break-word; font: 12px/1.45 ui-monospace, Menlo, monospace; background: var(--fondo); padding: 10px; border-radius: 8px; max-height: 260px; overflow: auto; }
 </style>
 </head>
 <body>
 <main>
-  <h1><img src="/static/icono.svg" alt="">Lector de facturas</h1>
+  <h1><img src="icono.svg" alt="">Lector de facturas</h1>
   <p class="sub">Elige qué datos quieres, haz una foto a la factura y la app los copia por ti.</p>
-
-  <div class="error" id="aviso-clave">Falta configurar la clave de la API de Claude (<code>ANTHROPIC_API_KEY</code>). Mira el README.</div>
 
   <section class="tarjeta">
     <h2><span class="paso">1</span>¿Qué datos quieres copiar?</h2>
@@ -116,6 +123,11 @@
   <section class="tarjeta">
     <h2><span class="paso">2</span>Foto o PDF de la factura</h2>
     <p class="ayuda">Si la factura tiene varias páginas, añádelas todas antes de leer.</p>
+    <div class="modo" role="radiogroup" aria-label="Modo de lectura">
+      <button type="button" role="radio" data-modo="gratis"><b>Gratis</b><small>En el móvil, sin Internet</small></button>
+      <button type="button" role="radio" data-modo="ia"><b>Precisa (IA)</b><small>Claude · de pago</small></button>
+    </div>
+    <p class="ayuda" id="ayuda-modo" style="margin-top:6px"></p>
     <div class="captura">
       <label class="boton lleno"><b>📷</b>Hacer foto<input type="file" id="camara" accept="image/*" capture="environment"></label>
       <label class="boton"><b>🖼️</b>Elegir fotos o PDF<input type="file" id="galeria" accept="image/*,application/pdf" multiple></label>
@@ -127,6 +139,7 @@
     </div>
     <button class="principal" id="leer" type="button" disabled>Leer factura</button>
     <div class="barra" id="barra"><div></div></div>
+    <div id="estado" aria-live="polite"></div>
     <div class="error" id="error" hidden></div>
   </section>
 
@@ -141,6 +154,8 @@
   </section>
 </main>
 
+<script src="reglas.js"></script>
+<script src="ocr.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
@@ -149,6 +164,25 @@ const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 
 let catalogo = null, paginas = [], facturas = cargar("facturas-resultados", []);
 let clave = cargar("facturas-clave", "");
+let modo = cargar("facturas-modo", "gratis"), iaDisponible = false, iaMotivo = "Comprobando…";
+
+// ---------- modo de lectura ----------
+const AYUDA_MODO = {
+  gratis: "Lee la foto en el propio móvil (Tesseract). Va bien con facturas claras e impresas; revisa siempre los datos.",
+  ia: "Usa la IA de Claude: entiende cualquier formato y las líneas de productos, pero cuesta unos céntimos por factura.",
+};
+function pintarModo() {
+  if (modo === "ia" && !iaDisponible) modo = "gratis";
+  document.querySelectorAll("[data-modo]").forEach((b) => {
+    b.classList.toggle("activo", b.dataset.modo === modo);
+    b.setAttribute("aria-checked", b.dataset.modo === modo);
+    if (b.dataset.modo === "ia") b.disabled = !iaDisponible;
+  });
+  $("#ayuda-modo").textContent = AYUDA_MODO[modo] + (iaDisponible ? "" : ` (Modo IA no disponible: ${iaMotivo})`);
+}
+document.querySelectorAll("[data-modo]").forEach((b) => b.addEventListener("click", () => {
+  modo = b.dataset.modo; guardar("facturas-modo", modo); pintarModo();
+}));
 
 // ---------- 1. selección de campos ----------
 function seleccion() {
@@ -204,17 +238,25 @@ $("#leer").addEventListener("click", async () => {
   if (!sel.cabecera.length && !sel.linea.length) return mostrarError("Elige al menos un dato en el paso 1.");
   if (!$("#caja-clave").hidden) { clave = $("#clave").value; guardar("facturas-clave", clave); }
   mostrarError("");
-  const datos = new FormData();
-  datos.append("campos", JSON.stringify(sel));
-  paginas.forEach((p) => datos.append("ficheros", p.fichero, p.fichero.name));
   $("#leer").disabled = true; $("#leer").textContent = "Leyendo factura…"; $("#barra").style.display = "block";
+  const estado = (t) => { $("#estado").textContent = t; };
   try {
-    const r = await fetch("/api/facturas/leer", { method: "POST", body: datos, headers: { "X-Clave": clave } });
-    let res;
-    try { res = await r.json(); } catch (e) { throw new Error(r.status === 413 ? "Las fotos pesan demasiado (máx. 40 MB)." : `Error ${r.status}`); }
-    if (r.status === 401) throw new Error("Clave de acceso incorrecta.");
-    if (!r.ok) throw new Error(res.error || `Error ${r.status}`);
-    facturas.unshift({ id: Date.now(), campos: sel, datos: res });
+    let res, texto = null;
+    if (modo === "gratis") {
+      texto = await LectorGratis.leerTexto(paginas.map((p) => p.fichero), estado);
+      res = ReglasFactura.extraer(texto, sel, Object.fromEntries(catalogo.cabecera.map((c) => [c.clave, c.etiqueta])));
+      if (res.vacio) throw new Error(res.avisos[0]);
+    } else {
+      estado("Enviando a la IA…");
+      const datos = new FormData();
+      datos.append("campos", JSON.stringify(sel));
+      paginas.forEach((p) => datos.append("ficheros", p.fichero, p.fichero.name));
+      const r = await fetch("api/facturas/leer", { method: "POST", body: datos, headers: { "X-Clave": clave } });
+      try { res = await r.json(); } catch (e) { throw new Error(r.status === 413 ? "Las fotos pesan demasiado (máx. 40 MB)." : `Error ${r.status}`); }
+      if (r.status === 401) throw new Error("Clave de acceso incorrecta.");
+      if (!r.ok) throw new Error(res.error || `Error ${r.status}`);
+    }
+    facturas.unshift({ id: Date.now(), campos: sel, datos: res, modo, texto });
     guardar("facturas-resultados", facturas);
     paginas.forEach((p) => p.url && URL.revokeObjectURL(p.url));
     paginas = [];
@@ -224,6 +266,7 @@ $("#leer").addEventListener("click", async () => {
     mostrarError(e.message === "Failed to fetch" ? "No se pudo conectar con la app." : e.message);
   } finally {
     $("#barra").style.display = "none";
+    estado("");
     pintarPaginas();
   }
 });
@@ -245,12 +288,13 @@ function pintarResultados() {
     const d = f.datos, cab = f.campos.cabecera, lin = f.campos.linea;
     const titulo = [d.emisor_nombre, d.numero_factura && `nº ${d.numero_factura}`, d.fecha].filter(Boolean).join(" · ") || `Factura ${facturas.length - fi}`;
     return `<article class="tarjeta factura">
-      <header><strong>${esc(titulo)}</strong><button class="boton peq" type="button" data-borrar="${fi}">Quitar</button></header>
+      <header><strong>${esc(titulo)}</strong><span class="etiqueta">${f.modo === "ia" ? "IA" : "Gratis"}</span><button class="boton peq" type="button" data-borrar="${fi}">Quitar</button></header>
       ${cab.length ? `<div class="datos">${cab.map((c) => `<div><label>${esc(etiqueta("cabecera", c))}</label>${entrada(fi, "cabecera", c, d[c])}</div>`).join("")}</div>` : ""}
       ${lin.length ? `<div class="tabla-caja"><table><thead><tr>${lin.map((c) => `<th>${esc(etiqueta("linea", c))}</th>`).join("")}</tr></thead><tbody>${
         (d.lineas || []).length ? d.lineas.map((l, li) => `<tr>${lin.map((c) => `<td class="${c === "descripcion" ? "desc" : ""}">${entrada(fi, "linea", c, l[c], li)}</td>`).join("")}</tr>`).join("")
         : `<tr><td class="vacio-res" colspan="${lin.length}">No se encontraron líneas</td></tr>`}</tbody></table></div>` : ""}
       ${(d.avisos || []).length ? `<ul class="avisos">${d.avisos.map((a) => `<li>${esc(a)}</li>`).join("")}</ul>` : ""}
+      ${f.texto ? `<details class="texto"><summary>Ver el texto leído</summary><pre>${esc(f.texto)}</pre></details>` : ""}
     </article>`;
   }).join("");
 }
@@ -327,11 +371,12 @@ $("#json").addEventListener("click", () => {
 });
 
 // ---------- inicio ----------
-fetch("/api/estado").then((r) => r.json()).then((e) => {
+fetch("api/estado").then((r) => r.json()).then((e) => {
   if (e.clave) { $("#caja-clave").hidden = false; $("#clave").value = clave; }
-  if (!e.facturas) $("#aviso-clave").style.display = "block";
-}).catch(() => {});
-fetch("/api/facturas/campos").then((r) => r.json()).then((c) => { catalogo = c; pintarChips(); pintarResultados(); })
+  iaDisponible = !!e.facturas;
+  iaMotivo = "falta poner ANTHROPIC_API_KEY en el servidor (ver README)";
+}).catch(() => { iaMotivo = "necesita la app arrancada con python app.py"; }).finally(pintarModo);
+fetch("campos.json").then((r) => r.json()).then((c) => { catalogo = c; pintarChips(); pintarResultados(); })
   .catch(() => mostrarError("No se pudo cargar la lista de datos. Recarga la página."));
 </script>
 </body>

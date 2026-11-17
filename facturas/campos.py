@@ -1,4 +1,4 @@
-"""Catálogo de datos que se pueden copiar de una factura.
+"""Catálogo de datos que se pueden copiar de una factura (se define en web/campos.json).
 
 Cada campo tiene: clave, etiqueta (lo que ve el usuario), tipo ("texto", "numero" o
 "fecha") y una pista para el modelo. Los campos de "cabecera" salen una vez por factura;
@@ -6,45 +6,15 @@ los de "linea" salen una vez por cada concepto/producto facturado.
 """
 from __future__ import annotations
 
-CABECERA = [
-    ("numero_factura", "Nº de factura", "texto", "Número o código de la factura"),
-    ("fecha", "Fecha", "fecha", "Fecha de emisión, en formato AAAA-MM-DD"),
-    ("emisor_nombre", "Emisor (nombre)", "texto", "Razón social o nombre de quien emite la factura (el vendedor)"),
-    ("emisor_nif", "NIF / CIF emisor", "texto", "NIF, CIF o NIE del emisor, sin espacios ni guiones"),
-    ("emisor_direccion", "Dirección emisor", "texto", "Dirección completa del emisor"),
-    ("cliente_nombre", "Cliente (nombre)", "texto", "Nombre o razón social del cliente/destinatario"),
-    ("cliente_nif", "NIF / CIF cliente", "texto", "NIF, CIF o NIE del cliente, sin espacios ni guiones"),
-    ("base_imponible", "Base imponible", "numero", "Suma de bases imponibles (total sin impuestos)"),
-    ("tipo_iva", "% IVA", "texto", "Tipo o tipos de IVA aplicados, p. ej. \"21\" o \"10 / 21\""),
-    ("cuota_iva", "Cuota IVA", "numero", "Importe total del IVA"),
-    ("recargo_equivalencia", "Recargo de equivalencia", "numero", "Importe total del recargo de equivalencia"),
-    ("irpf", "Retención IRPF", "numero", "Importe de la retención de IRPF (positivo aunque reste)"),
-    ("otros_impuestos", "Otros impuestos", "numero", "Importe de otros impuestos (IGIC, IPSI, tasas...)"),
-    ("descuento", "Descuento", "numero", "Descuento total aplicado a la factura"),
-    ("total", "Total factura", "numero", "Importe total a pagar"),
-    ("moneda", "Moneda", "texto", "Código ISO de la moneda, p. ej. EUR"),
-    ("forma_pago", "Forma de pago", "texto", "Forma de pago (efectivo, tarjeta, transferencia...)"),
-    ("iban", "IBAN", "texto", "IBAN o cuenta bancaria para el pago, sin espacios"),
-    ("vencimiento", "Vencimiento", "fecha", "Fecha de vencimiento, en formato AAAA-MM-DD"),
-]
+import json
+from pathlib import Path
 
-LINEA = [
-    ("descripcion", "Descripción", "texto", "Descripción del producto o servicio"),
-    ("referencia", "Referencia / código", "texto", "Código o referencia del artículo"),
-    ("cantidad", "Cantidad", "numero", "Unidades, kilos, horas..."),
-    ("precio_unitario", "Precio unitario (sin IVA)", "numero", "Precio por unidad antes de impuestos"),
-    ("precio_unitario_iva", "Precio unitario con IVA", "numero", "Precio por unidad con impuestos incluidos"),
-    ("descuento", "Descuento línea", "numero", "Descuento aplicado a la línea (importe)"),
-    ("tipo_iva", "% IVA línea", "numero", "Porcentaje de IVA de la línea, p. ej. 21"),
-    ("importe", "Importe (sin IVA)", "numero", "Importe de la línea antes de impuestos"),
-    ("importe_iva", "Importe con IVA", "numero", "Importe de la línea con impuestos incluidos"),
-]
+_RUTA = Path(__file__).resolve().parent.parent / "web" / "campos.json"
+_DATOS = json.loads(_RUTA.read_text(encoding="utf-8"))  # misma lista que usa la página web
 
-POR_DEFECTO = {
-    "cabecera": ["numero_factura", "fecha", "emisor_nombre", "emisor_nif",
-                 "base_imponible", "cuota_iva", "total"],
-    "linea": ["descripcion", "cantidad", "precio_unitario", "importe"],
-}
+CABECERA = [(c["clave"], c["etiqueta"], c["tipo"], c["pista"]) for c in _DATOS["cabecera"]]
+LINEA = [(c["clave"], c["etiqueta"], c["tipo"], c["pista"]) for c in _DATOS["linea"]]
+POR_DEFECTO = _DATOS["por_defecto"]
 
 
 def catalogo() -> dict:

@@ -1,0 +1,4 @@
+# Solo para el modo IA (Claude). El modo gratuito no necesita nada más que flask.
+-r requirements.txt
+anthropic>=2.9
+pillow>=10.0

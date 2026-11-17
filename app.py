@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Lector de facturas: app web pensada para el móvil.
 
+El modo gratuito funciona entero en el navegador (web/ocr.js + web/reglas.js); este servidor
+sirve la página y, si hay ANTHROPIC_API_KEY, el modo preciso con la IA de Claude.
+
   python app.py                      -> http://localhost:8000
   APP_CLAVE=secreta python app.py    (pide clave; recomendable si la publicas en Internet)
 
@@ -15,13 +18,12 @@ from pathlib import Path
 
 from flask import Flask, abort, jsonify, request, send_from_directory
 
-from facturas import campos as C
 from facturas.lector import ErrorFactura, leer_factura
 
 BASE = Path(__file__).parent
 CLAVE = os.environ.get("APP_CLAVE")
 
-app = Flask(__name__, static_folder=str(BASE / "web"), static_url_path="/static")
+app = Flask(__name__, static_folder=str(BASE / "web"), static_url_path="")  # web/ se sirve en la raíz
 app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # fotos/PDF
 
 
@@ -35,21 +37,10 @@ def inicio():
     return send_from_directory(BASE / "web", "index.html")
 
 
-@app.get("/manifest.webmanifest")
-def manifest():
-    return send_from_directory(BASE / "web", "manifest.webmanifest",
-                               mimetype="application/manifest+json")
-
-
 @app.get("/api/estado")
 def estado():
     return jsonify(clave=bool(CLAVE),
                    facturas=bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")))
-
-
-@app.get("/api/facturas/campos")
-def campos():
-    return jsonify(C.catalogo())
 
 
 @app.post("/api/facturas/leer")
