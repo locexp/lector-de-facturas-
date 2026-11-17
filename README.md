@@ -65,10 +65,10 @@ cp .env.ejemplo .env      # (opcional) ANTHROPIC_API_KEY para el modo IA
 La consola muestra una dirección del tipo `http://192.168.1.20:8000`: ábrela en el móvil
 conectado a la **misma wifi**.
 
-### Solo modo gratuito, sin instalar nada (GitHub Pages)
-La carpeta `web/` funciona sola como página estática: en GitHub, *Settings → Pages* →
-publica la rama con la carpeta `/web` (o súbela a cualquier hosting). El modo IA aparecerá
-desactivado porque necesita el servidor.
+### Sin instalar nada: https://locexp.github.io/lector-de-facturas-/
+La carpeta `web/` está publicada en **GitHub Pages**: abre esa dirección en el móvil y
+«Añadir a pantalla de inicio». Solo tiene el modo gratuito (el modo IA necesita el servidor).
+Cada cambio en `web/` se vuelve a publicar solo (`.github/workflows/pages.yml`).
 
 ### En un servidor (Render, Railway, un VPS...)
 Comando de inicio `python app.py` (usa la variable `PORT`). Pon `ANTHROPIC_API_KEY` y
