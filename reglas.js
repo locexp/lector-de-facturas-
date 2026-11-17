@@ -100,6 +100,8 @@
 
   const LETRA_COMO_NUMERO = { 7: "Z", 2: "Z", 8: "B", 0: "D", 5: "S", 6: "G", 4: "A", 1: "T" };
   const RE_DNI_SIN_LETRA = /\b\d{2}[.\s]?\d{3}[.\s]?\d{3}[\s.\-]?\d\b/g;
+  const CIFRA_COMO_LETRA = { 8: ["B"], 5: ["B", "S"], 6: ["G"], 4: ["A"], 0: ["D", "Q"] };
+  const letraCalculada = new Set();
 
   function buscarNifs(lineas) {
     const res = [];
@@ -109,8 +111,15 @@
         for (const m of l.matchAll(RE_DNI_SIN_LETRA)) {
           const d = m[0].replace(/\D/g, ""), letra = LETRA_COMO_NUMERO[d[8]];
           if (letra && nifValido(d.slice(0, 8) + letra)) candidatos.push(d.slice(0, 8) + letra);
+          // o es un CIF con la letra del principio leída como cifra: B->8 o 5, G->6, A->4, D->0, S->5
+          for (const l0 of CIFRA_COMO_LETRA[d[0]] || []) {
+            if (nifValido(l0 + d.slice(1)) && !candidatos.includes(l0 + d.slice(1))) { candidatos.push(l0 + d.slice(1)); break; }
+          }
         }
       }
+      // DNI sin la letra, solo en su línea ("78105855"): la letra se calcula
+      const solo = l.trim().match(/^(?:(?:nif|dni|n\.i\.f\.?)\s*:?\s*)?(\d{8})$/i);
+      if (solo) { candidatos.push(solo[1] + LETRAS_DNI[+solo[1] % 23]); letraCalculada.add(solo[1] + LETRAS_DNI[+solo[1] % 23]); }
       for (const c of candidatos) {
         const valor = arreglarNif(c);
         const sinPrefijo = valor.replace(/^ES/, "");
@@ -144,7 +153,7 @@
     recargo: /\b(recargo|r\.? ?e\.? )\b/,
     irpf: /\b(irpf|retencion)\b/,
     descuento: /\b(descuento|dto\.?)\b/,
-    nombreEmpresa: /\b(s\.?\s?l\.?\s?u?\.?|s\.?\s?a\.?\s?u?\.?|s\.?\s?coop\.?|s\.?\s?l\.?\s?l\.?|c\.?\s?b\.?|sociedad|slne)$/,
+    nombreEmpresa: /\b(s\.?\s?[li1]\.?\s?u?\.?|s\.?\s?a\.?\s?u?\.?|s\.?\s?coop\.?|s\.?\s?l\.?\s?l\.?|c\.?\s?b\.?|sociedad|slne)$/,
     direccion: /(^|[^a-z])(c\/|calle|avda|avenida|av\.|plaza|pza|paseo|ctra|carretera|camino|ronda|poligono|pol\.|travesia|urb\.)(?![a-z])|\b\d{5}\b/,
   };
 
@@ -195,7 +204,8 @@
       /^\s*(?:n[º°o*?]\.?|num\.?|numero|nro\.?)\s*[:#]?\s*([A-Z0-9][A-Z0-9\-\/.]*\d[A-Z0-9\-\/]*)/i,
     ];
     for (const re of res) {
-      for (const l of lineas) {
+      for (const l0 of lineas) {
+        const l = l0.replace(/(\w)\s+\/\s+(?=\w)/g, "$1/");   // "2026 / FV38 / 4397" -> "2026/FV38/4397"
         const m = quitarTildes(l).match(re);
         if (!m || RE_FECHA.test(m[1]) || nifValido(m[1]) !== null) continue;
         if (K.total.test(plano(l)) || /^\d+[.,]\d{1,2}$/.test(m[1])) continue;   // es un importe, no un número
@@ -214,13 +224,18 @@
   }
 
   function limpiarNombre(l) {
-    return l.replace(/^\s*(cliente|emisor|proveedor|raz[oó]n social|nombre|destinatario|facturar a)\s*[:.]?\s*/i, "")
+    return l.replace(/^(?:[^\s\p{Lu}]\S?\s+)+/u, "").replace(/(,?\s+)[Ss][i1|]$/, "$1SL").replace(/^\s*(cliente|emisor|proveedor|raz[oó]n social|nombre|destinatario|facturar a)\s*[:.]?\s*/i, "")
       .replace(/\s*(N\.?I\.?F|C\.?I\.?F|NIF|CIF)\b.*$/i, "").replace(/\s{2,}/g, " ").replace(/[\s,;:]+$/, "").trim() || null;
   }
 
   const iniClienteTmp = (p) => p.findIndex((l) => K.cliente.test(l));
 
+  /** ¿Parece un nombre (de persona o empresa)? Varias palabras, sin cifras ni etiquetas. */
+  const pareceNombre = (l) => /^[\p{L}&.,'\s-]+$/u.test(l.trim()) && (l.trim().match(/\p{L}{2,}/gu) || []).length >= 2 &&
+    !esResumen(l) && !K.direccion.test(plano(l));
+
   function cabecera(lineas, avisos) {
+    letraCalculada.clear();
     const d = {};
     const p = lineas.map(plano);
 
@@ -235,6 +250,8 @@
     if (emi && validos.length === 1 && iniClienteTmp(p) < 0 && !nombreCerca(lineas, emi.linea - 7, emi.linea + 3))
       avisos.push(`Solo aparece un NIF (${emi.valor}) y no se sabe si es del emisor o del cliente: revísalo.`);
     d.cliente_nif = cli ? cli.valor : null;
+    for (const n of [emi, cli]) if (n && letraCalculada.has(n.valor))
+      avisos.push(`El NIF ${n.valor} se leyó sin letra y la letra se ha calculado: revísalo.`);
     nifs.filter((n) => !n.valido).forEach((n) =>
       avisos.push(`Parece un NIF/CIF (${n.valor}) pero su letra de control no es válida; puede estar mal leído.`));
 
@@ -255,7 +272,8 @@
         nombreCerca(lineas, iniCliente, iniCliente + 4) ||
         limpiarNombre(lineas.slice(iniCliente + 1, iniCliente + 3).find((l) => /[a-zñ]{3,}/i.test(l) && !K.direccion.test(plano(l))) || "");
     } else {
-      d.cliente_nombre = cli ? nombreCerca(lineas, cli.linea - 3, cli.linea + 2) : null;
+      d.cliente_nombre = cli ? (nombreCerca(lineas, cli.linea - 3, cli.linea + 2) ||
+        limpiarNombre([1, 2].map((k) => lineas[cli.linea - k] || "").find(pareceNombre) || "")) : null;
     }
     // Dirección del emisor: líneas con calle / código postal cerca del principio
     const dir = [];
@@ -325,6 +343,40 @@
         if (pc.length && !d.tipo_iva) d.tipo_iva = [...new Set(pc)].map((t) => String(t).replace(".", ",")).join(" / ");
       }
     });
+
+    // Tabla de impuestos en columnas: títulos "Base. | %IVA | IVA | %Rec. | Rec. | Imp." y debajo
+    // los valores en el mismo orden (los ilegibles se ignoran)
+    const clase = (t) => {
+      const x = plano(t).replace(/[^a-z%]/g, "");
+      if (/^[%y]rec|^%re$|^tiporec/.test(x)) return "prec";
+      if (/^%iva|^%$|^tipo/.test(x)) return "tipo";
+      if (/^base|^bimp/.test(x)) return "base";
+      if (/^rec/.test(x)) return "rec";
+      if (/^(iva|cuota)/.test(x)) return "cuota";
+      if (/^total/.test(x)) return "total";
+      return null;
+    };
+    let pRec = null;
+    lineas.forEach((l, i) => {
+      const tit = l.trim().split(/\s{2,}/), vals = (lineas[i + 1] || "").trim().split(/\s{2,}/);
+      if (tit.length < 3 || importes(l).length || vals.length !== tit.length) return;
+      const clases = tit.map(clase);
+      if (!clases.includes("base") || clases.filter(Boolean).length < 3) return;
+      clases.forEach((c, k) => {
+        const v = /^-?\d[\d.,]*\s*%?$/.test(vals[k]) ? parsearImporte(vals[k].replace("%", "")) : null;
+        if (v === null || !c) return;
+        if (c === "base") d.base_imponible = v;
+        else if (c === "tipo") d.tipo_iva = String(v).replace(".", ",");
+        else if (c === "cuota") d.cuota_iva = v;
+        else if (c === "rec") d.recargo_equivalencia = v;
+        else if (c === "prec") pRec = v;
+        else if (c === "total" && d.total === null) d.total = v;
+      });
+    });
+    if (pRec && d.recargo_equivalencia === null && d.base_imponible !== null) {
+      d.recargo_equivalencia = red2(d.base_imponible * pRec / 100);
+      avisos.push(`El recargo de equivalencia no se leía; se ha calculado como base × ${String(pRec).replace(".", ",")} %.`);
+    }
 
     // Desglose de IVA de tiques: filas "4%  17,60  0,70" y una fila "TOTAL  42,40  3,36" debajo
     const desglose = [];
@@ -462,7 +514,7 @@
   function lineaProducto(l) {
     if (!/[a-zñ]{3,}/i.test(l) || /@|www\.|https?:/i.test(l)) return null;
     const limpia = l.replace(/\s*€\s*/g, "  ").replace(/\s+[A-E]\s*$/, "")   // códigos de IVA tipo "A" al final
-      .replace(/(\s\d+(?:[.,]\d+)?)\s+(?:und|uds|ud|un|u|cjs?)\.?(?=\s|$)/gi, "$1")   // "1,0000 Und" -> "1,0000"
+      .replace(/(\s\d+[.,]\d+)\s+(?:und|uds|ud|un|u|cjs?)\.?(?=\s|$)/gi, "$1")   // "1,0000 Und" -> "1,0000" ("CAJA 15 UD" se queda)
       .replace(/\b(?:iva|igic|ipsi)\s+(?=\d{1,2}(?:[.,]\d+)?\s*%)/gi, "")                  // "IVA 21%" -> "21%"
       .replace(/\s*\((?:bienes|servicios)\)/gi, "")
       .replace(/(\d)(?:\s+[^\d\s]{1,2})+\s*$/, "$1")                    // "1,85    E": marcas detrás del importe
@@ -488,7 +540,10 @@
     if (!final.decimales && nums.length === 1 && !final.columna) return null;
     resto = resto.trim().replace(/^(?!\[[^\]]{1,20}\])(?:[|\]\[!}{¡]\s*|[lI]\s+(?=\d))(?=[A-ZÁÉÍÓÚÑ0-9])/, "");
     let cantidad = null, referencia = null;
-    const q = resto.match(/^(\d+(?:[.,]\d{1,3})?)\s*(?:x|uds?\.?|u\.|ud\.|kg|und\.?)?\s+(?=\D|\d+\s+[A-Za-zÁÉÍÓÚÑ])/i);
+    // código numérico de 4 o más cifras al principio ("1261  GIR. AGUASAL..."): es la referencia
+    const cod = resto.match(/^(\d{4,})\s+(?=[A-Za-zÁÉÍÓÚÑ])/);
+    if (cod) { referencia = cod[1]; resto = resto.slice(cod[0].length); }
+    const q = cod ? null : resto.match(/^(\d+(?:[.,]\d{1,3})?)\s*(?:x|uds?\.?|u\.|ud\.|kg|und\.?)?\s+(?=\D|\d+\s+[A-Za-zÁÉÍÓÚÑ])/i);
     if (q) { cantidad = parsearImporte(q[1]); resto = resto.slice(q[0].length); }
     // código de artículo al principio: "[MB670]", "TOR-440", "GR-2910201", "BE - BE0012-C545"
     const rc = resto.match(/^\[([^\]]{1,20})\]\s*/);
@@ -530,6 +585,11 @@
         if (p) { precio = p; cantidad = Math.round(importe / p); } else revisar = true;
       } else if (v.length === 3) {
         [cantidad, precio] = v;
+        // "15  10,23  10,23": el 15 son unidades por caja; la cantidad es importe / precio
+        const r = importe / v[1];
+        if (!cerca(v[0] * v[1], importe, 0.02) && nums[2].decimales && v[1] > 0 && cerca(r, Math.round(r), 0.002) && Math.round(r) >= 1 && r <= 999) {
+          cantidad = Math.round(r); precio = v[1];
+        }
       } else if (v.length === 2) {
         if (!nums[0].decimales && Number.isInteger(v[0]) && v[0] <= 999 && !cerca(v[0], importe, 0.001)) {
           cantidad = v[0]; precio = red2(importe / (cantidad || 1));
@@ -651,6 +711,8 @@
     return res;
   }
 
+  const x_cp = (l) => l.cantidad * l.precio - (l.descuento || 0);
+
   function lineas(lineasTexto, cab, avisos) {
     const res = buscarProductos(lineasTexto);
     if (!res.length) return res;
@@ -687,6 +749,10 @@
     for (const objetivo of [cab.total, cab.base_imponible]) {
       if (objetivo === null || cerca(suma, objetivo, 0.02)) continue;
       const arreglos = [];
+      for (const l of res.filter((x) => x.revisar && x.importe !== null && x.cantidad && x.precio)) {
+        const alt = red2(x_cp(l));
+        if (alt !== l.importe && cerca(suma - l.importe + alt, objetivo, 0.02)) arreglos.push({ l, alt });
+      }
       for (const l of res.filter((x) => x.sinComa && x.sinComa.length >= 4)) {
         for (let k = 0; k < l.sinComa.length; k++) {
           const alt = +(l.sinComa.slice(0, k) + l.sinComa.slice(k + 1)) / 100;
@@ -696,6 +762,7 @@
       if (arreglos.length === 1) {
         const { l, alt } = arreglos[0];
         l.importe = alt; if (l.cantidad === 1) l.precio = alt;
+        l.corregida = true;
         suma = red2(res.reduce((a, x) => a + (x.importe || 0), 0));
         break;
       }
