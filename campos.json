@@ -147,6 +147,18 @@
    "pista": "Precio por unidad con impuestos incluidos"
   },
   {
+   "clave": "kilos",
+   "etiqueta": "Peso (kg)",
+   "tipo": "numero",
+   "pista": "Kilos de los productos vendidos al peso (null si se venden por unidades)"
+  },
+  {
+   "clave": "precio_kilo",
+   "etiqueta": "Precio por kilo (€/kg)",
+   "tipo": "numero",
+   "pista": "Precio por kilo tal como aparece en la factura (null si no se vende al peso)"
+  },
+  {
    "clave": "descuento",
    "etiqueta": "Descuento línea",
    "tipo": "numero",
@@ -160,9 +172,9 @@
   },
   {
    "clave": "importe",
-   "etiqueta": "Importe (sin IVA)",
+   "etiqueta": "Base imponible (importe sin IVA)",
    "tipo": "numero",
-   "pista": "Importe de la línea antes de impuestos"
+   "pista": "Base imponible de la línea: importe antes de impuestos"
   },
   {
    "clave": "importe_iva",
