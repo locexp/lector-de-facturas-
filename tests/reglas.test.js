@@ -150,3 +150,60 @@ test("tabla resumen con los importes debajo", () => {
 test("Nº leído como N*2", () => {
   assert.equal(R.extraer(FACTURA.replace("FACTURA Nº:", "FACTURA N*2:"), TODO).numero_factura, "F-2026/0153");
 });
+
+test("productos con palabras de totales o pagos en la descripción", () => {
+  const texto = `TALLER PEREZ S.L.\nCIF B12345674\n` +
+    `Cambio de aceite 5W30                1     45,00     45,00\n` +
+    `Tarjeta de memoria 64GB              2     12,99     25,98\n` +
+    `Cuota mensual de mantenimiento       1     30,00     30,00\n` +
+    `Cambio                                          5,00\n` +
+    `TARJETA VISA                                  100,98\n` +
+    `Entregado                                     120,00\n` +
+    `Total a pagar                                 100,98\n`;
+  const ls = R.buscarProductos(texto.split("\n"));
+  assert.deepEqual(ls.map((l) => [l.descripcion, l.cantidad, l.importe]), [
+    ["Cambio de aceite 5W30", 1, 45], ["Tarjeta de memoria 64GB", 2, 25.98], ["Cuota mensual de mantenimiento", 1, 30]]);
+});
+
+test("descripciones en varios renglones", () => {
+  const texto = `Ref.   Descripción                    Cant.   Precio   Importe\n` +
+    `A-100  Mantenimiento anual caldera      1     120,00    120,00\n` +
+    `       incluye revisión de gases y\n` +
+    `       limpieza del quemador\n` +
+    `A-200  Termostato digital               1      45,50     45,50\n` +
+    `\n` +
+    `Base imponible                                          165,50\n` +
+    `Observaciones: entregar por la mañana\n`;
+  const ls = R.buscarProductos(texto.split("\n"));
+  assert.deepEqual(ls.map((l) => l.descripcion), [
+    "Mantenimiento anual caldera incluye revisión de gases y limpieza del quemador", "Termostato digital"]);
+});
+
+test("importes sin decimales en columna", () => {
+  const texto = `Mano de obra          2      150      300\nDesplazamiento                         40\n` +
+    `Madrid                               28013\nTeléfono                         912345678\nEjercicio                             2026\n` +
+    `Tornillos caja 100 2 6,30 12,60\nPágina 1 de 2\nTotal artículos                        3\n`;
+  const ls = R.buscarProductos(texto.split("\n"));
+  assert.deepEqual(ls.map((l) => [l.descripcion, l.cantidad, l.precio, l.importe]), [
+    ["Mano de obra", 2, 150, 300], ["Desplazamiento", 1, 40, 40], ["Tornillos caja 100", 2, 6.3, 12.6]]);
+});
+
+test("muchas líneas: no hay tope", () => {
+  const filas = Array.from({ length: 300 }, (_, i) => `Tornillo modelo M${i + 1}          1      2,50      2,50`);
+  const d = R.extraer(`TIENDA PRUEBA S.L.\nCIF B12345674\n${filas.join("\n")}\nTotal  750,00\n`,
+    { cabecera: ["total"], linea: ["descripcion", "importe"] });
+  assert.equal(d.lineas.length, 300);
+  assert.ok(!d.avisos.some((a) => /no cuadra/.test(a)), d.avisos.join(" | "));
+});
+
+test("errores del OCR en los importes se corrigen con cantidad x precio", () => {
+  const t = (l) => { const r = R.lineaProducto(l); return [r.cantidad, r.precio, r.importe, r.revisar]; };
+  assert.deepEqual(t("B-202 Tornillo modelo M3          1     2,25     225"), [1, 2.25, 2.25, false]);
+  assert.deepEqual(t("B-224 Tornillo modelo M25         1     1325    13,25"), [1, 13.25, 13.25, false]);
+  assert.deepEqual(t("B-225 Tornillo modelo M26         2    13,75    3-5"), [2, 13.75, 27.5, true]);
+  assert.deepEqual(t("Bombilla LED                      3     2,00     5,00"), [3, 2, 5, true]);
+  const d = R.extraer("TIENDA S.L.\nCIF B12345674\nFACTURA N?: T-88\nBombilla LED     3     2,00     5,00\nTotal   5,00\n",
+    { cabecera: ["numero_factura"], linea: ["descripcion"] });
+  assert.equal(d.numero_factura, "T-88");
+  assert.ok(d.avisos.some((a) => a.includes("«Bombilla LED»")), d.avisos.join(" | "));
+});

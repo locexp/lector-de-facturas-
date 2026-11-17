@@ -37,6 +37,16 @@ se lee directamente, sin OCR, y es casi perfecto.
 Para el modo IA crea una clave en https://console.anthropic.com → *API Keys* y ponla en
 `.env` (ver `.env.ejemplo`). Sin clave, la app funciona igual en modo gratuito.
 
+**¿Cuántas líneas lee?** No hay tope de líneas de producto. En modo gratuito se
+coge cada renglón con forma de producto (descripción + importes), aunque la descripción
+tenga palabras como «cambio» o «tarjeta»; los renglones sin importe que van debajo se
+unen a la descripción, y se admiten importes sin decimales si van en su columna. Cada
+línea se comprueba con cantidad × precio = importe: si el OCR se ha comido una coma
+(«2,25» → «225») se corrige, y si no cuadra o el importe no se lee, la app te dice qué
+líneas revisar. Límites: PDF hasta 10 páginas; en modo IA, 10 fotos/PDF por factura y
+unas 250-400 líneas. Para tiques muy largos, haz varias fotos por tramos y añádelas como
+páginas de la misma factura.
+
 **Consejos para el modo gratuito:** foto de frente, con buena luz, sin sombras y que la
 factura ocupe toda la imagen. Si una factura sale mal, prueba el modo IA.
 
