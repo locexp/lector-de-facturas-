@@ -47,6 +47,13 @@ líneas revisar. Límites: PDF hasta 10 páginas; en modo IA, 10 fotos/PDF por f
 unas 250-400 líneas. Para tiques muy largos, haz varias fotos por tramos y añádelas como
 páginas de la misma factura.
 
+**Fotos de tiques y facturas:** la app recorta el papel (aunque esté sobre una mesa oscura),
+iguala la luz (sombras y reflejos) y reconstruye los renglones con la posición de cada palabra.
+Como el OCR cambia mucho con pequeños detalles de la imagen, prueba hasta 3 lecturas
+distintas y se queda con la primera en la que la suma de las líneas cuadra con el total. Entiende
+productos al peso («1,352 kg 10,95 €/kg»), el desglose de IVA por tipos de los tiques y
+comprueba la cuota con base × tipo. Lo que no se lee bien se deja vacío y se marca para revisar.
+
 **Consejos para el modo gratuito:** foto de frente, con buena luz, sin sombras y que la
 factura ocupe toda la imagen. Si una factura sale mal, prueba el modo IA.
 

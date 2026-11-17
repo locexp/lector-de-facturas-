@@ -340,3 +340,74 @@ test("pro-forma en PDF: 8 líneas, IVA 10 y 21 %, subtotal como base", () => {
   assert.ok(d.avisos.some((a) => /Solo aparece un NIF/.test(a)), d.avisos.join(" | "));
   assert.ok(!d.avisos.some((a) => /no cuadra|Revisa|no coincide/.test(a)), d.avisos.join(" | "));
 });
+
+// Tique de Mercadona (foto de un usuario) tal como lo lee Tesseract, con sus errores reales:
+// "195" y "591" sin coma, "1555" por "1,55", "14,90" por "14,80", total "15,16" y cuota "3,46".
+const MERCADONA = `MERCADONA, S.A.
+A-46103834
+AV REINO UNIDO, 3
+41012 SEVILLA
+TELÉFONO:    954619421
+17/11/2026 15:33 OP:1343100
+HACTURA SIMPLIFICADA:    3501-015-506212
+|    Descripción    P, Unit    Imp.(e)
+| CEBOLLA TUBO    1,50
+1 ESPINACA BABY    1,15
+1 CANÓNIGOS    1,20
+1 FILM TRANSPARENTE    195
+1 FILETE LOMO FAM    591
+| YOGUR NATURAL X6    1.00
+2 BARRA RÚSTICA    0,70    1,40
+1 12 HUEVOS GRANDES-L    3,05
+1 CHAMPIÑÓN BLAN    1,45
+1 ALMENDRA TOST S/PIEL    2,90
+1 GUISANTE FINO    1555
+1 AJO SECO 250 G    1,85
+FILETE MELVA OLIVA    1,90
+1 ZANAHORIA BOLSA    1,20
+PESCADO
+Salmon Entero
+1,352 kg    10,95 €/kg    14,90
+1 PIMIENTO ROJO
+0,252 kg    2,90 €/kg    0,73
+1 CALABACIN VERDE
+0,378 kg    1,90 €/kg    0,72
+1 BANANA
+0,968 kg    1,55 €/kg    1,50
+1 PARKING    0,00
+ENTRADA 15:16 SALIDA 15:33
+TOTAL    15,16
+ENTREGA EFECTIVO    30,00
+DEVOLUCIÓN    4,4
+YA    BASE IMPONIBLE (€)    CUOTA (€)
+4%    17,60    0,70
+10%    23,19    4.
+21%    1,61    "Ea
+TOTAL    42,40    3,46
+DISPONE DE 20 MINUTOS`;
+
+test("tique de supermercado con errores del OCR, productos al peso y desglose de IVA", () => {
+  const d = R.extraer(MERCADONA, TODO);
+  assert.deepEqual([d.emisor_nombre, d.emisor_nif, d.numero_factura, d.fecha, d.forma_pago],
+    ["MERCADONA, S.A.", "A46103834", "3501-015-506212", "2026-11-17", "Efectivo"]);
+  assert.deepEqual([d.base_imponible, d.tipo_iva, d.cuota_iva, d.total], [42.4, "4 / 10 / 21", 3.36, 45.76]);
+  assert.deepEqual(d.lineas.map((l) => [l.descripcion, l.cantidad, l.precio_unitario_iva, l.importe_iva]), [
+    ["CEBOLLA TUBO", 1, 1.5, 1.5], ["ESPINACA BABY", 1, 1.15, 1.15], ["CANÓNIGOS", 1, 1.2, 1.2],
+    ["FILM TRANSPARENTE", 1, 1.95, 1.95], ["FILETE LOMO FAM", 1, 5.91, 5.91], ["YOGUR NATURAL X6", 1, 1, 1],
+    ["BARRA RÚSTICA", 2, 0.7, 1.4], ["12 HUEVOS GRANDES-L", 1, 3.05, 3.05], ["CHAMPIÑÓN BLAN", 1, 1.45, 1.45],
+    ["ALMENDRA TOST S/PIEL", 1, 2.9, 2.9], ["GUISANTE FINO", 1, 1.55, 1.55], ["AJO SECO 250 G", 1, 1.85, 1.85],
+    ["FILETE MELVA OLIVA", 1, 1.9, 1.9], ["ZANAHORIA BOLSA", 1, 1.2, 1.2],
+    ["Salmon Entero", 1.352, 10.95, 14.8], ["PIMIENTO ROJO", 0.252, 2.9, 0.73], ["CALABACIN VERDE", 0.378, 1.9, 0.72],
+    ["BANANA", 0.968, 1.55, 1.5], ["PARKING", 1, 0, 0],
+  ]);
+  assert.equal(d.lineas.reduce((a, l) => a + l.importe_iva, 0).toFixed(2), "45.76");   // cuadra con el total
+  assert.ok(d.avisos.some((a) => /Revisa estas líneas/.test(a)));   // las corregidas quedan marcadas
+});
+
+test("enteros en una factura con céntimos: los que cuadran no se tocan", () => {
+  const texto = `TALLER S.L.\nCIF B12345674\nFactura 5/2026\n` +
+    `Mano de obra          2      150      300\nFiltro de aceite      1    12,50    12,50\nJunta tapa            1     4,25     4,25\n` +
+    `Base imponible                    316,75\n`;
+  const d = R.extraer(texto, { cabecera: ["base_imponible"], linea: ["descripcion", "importe"] });
+  assert.deepEqual(d.lineas.map((l) => l.importe), [300, 12.5, 4.25]);
+});

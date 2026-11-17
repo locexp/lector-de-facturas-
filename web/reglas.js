@@ -191,7 +191,7 @@
 
   function numeroFactura(lineas) {
     const res = [
-      /(?:factura|fra\.?|ticket|tique|recibo|albaran|n[º°o]\.?\s*(?:de\s*)?(?:factura|documento|doc\.?)|documento)\s*(?:(?:simplificada|pro-?\s?forma|rectificativa|proforma)\s*)?(?:n\s?[º°o*?.]*(?:\d(?=\s*[:#]))?|num\.?|numero|nro\.?|#)?\s*[:.#]?\s*([A-Z0-9][A-Z0-9\-\/.]*\d[A-Z0-9\-\/]*)/i,
+      /(?:[fh]a[cl]?tura|fra\.?|ticket|tique|recibo|albaran|n[º°o]\.?\s*(?:de\s*)?(?:factura|documento|doc\.?)|documento)\s*(?:(?:simplificada|pro-?\s?forma|rectificativa|proforma)\s*)?(?:n\s?[º°o*?.]*(?:\d(?=\s*[:#]))?|num\.?|numero|nro\.?|#)?\s*[:.#]?\s*([A-Z0-9][A-Z0-9\-\/.]*\d[A-Z0-9\-\/]*)/i,
       /^\s*(?:n[º°o*?]\.?|num\.?|numero|nro\.?)\s*[:#]?\s*([A-Z0-9][A-Z0-9\-\/.]*\d[A-Z0-9\-\/]*)/i,
     ];
     for (const re of res) {
@@ -326,6 +326,52 @@
       }
     });
 
+    // Desglose de IVA de tiques: filas "4%  17,60  0,70" y una fila "TOTAL  42,40  3,36" debajo
+    const desglose = [];
+    let filaTotal = null;
+    lineas.forEach((l, i) => {
+      const m = l.match(/^\s*(?:i\.?v\.?a\.?\s*)?(\d{1,2}(?:[.,]\d{1,2})?)\s*%\s+(-?\d[\d.,]*)(?:\s+(-?\d[\d.,]*))?(?:\s+(-?\d[\d.,]*))?(?:\s+\S{1,4})?\s*$/i);
+      if (m && TIPOS_IVA.includes(parsearImporte(m[1]))) {
+        desglose.push({ i, tipo: parsearImporte(m[1]), base: parsearImporte(m[2]), cuota: m[3] ? parsearImporte(m[3]) : null });
+        return;
+      }
+      const ult = desglose[desglose.length - 1];
+      if (ult && i - ult.i <= 3 && /^\s*total/i.test(l)) {
+        const v = importes(l);
+        if (v.length >= 2) filaTotal = { i, base: v[0], cuota: v[1] };
+      }
+    });
+    // es una tabla de desglose solo si alguna fila trae base y cuota ("IVA 21%  17,35" suelto es la cuota)
+    if (!desglose.some((r) => r.cuota !== null)) desglose.length = 0;
+    if (desglose.length) {
+      d.tipo_iva = [...new Set(desglose.map((r) => r.tipo))].sort((a, b) => a - b).map((t) => String(t).replace(".", ",")).join(" / ");
+      const sb = red2(desglose.reduce((a, r) => a + (r.base || 0), 0)), sc = red2(desglose.reduce((a, r) => a + (r.cuota || 0), 0));
+      d.base_imponible = filaTotal ? filaTotal.base : sb;
+      d.cuota_iva = filaTotal ? filaTotal.cuota : sc;
+      // comprobación: la cuota de cada fila es base x tipo; si lo leído no cuadra, se usa lo calculado
+      if (desglose.every((r) => r.base !== null) && cerca(sb, d.base_imponible, 0.02)) {
+        const calculada = red2(desglose.reduce((a, r) => a + red2(r.base * r.tipo / 100), 0));
+        if (d.cuota_iva === null || !cerca(calculada, d.cuota_iva, 0.03)) {
+          if (d.cuota_iva !== null) avisos.push(`La cuota de IVA leída (${d.cuota_iva.toFixed(2)}) no cuadra con base × tipo; se usa ${calculada.toFixed(2)}.`);
+          d.cuota_iva = calculada;
+        }
+      }
+      if (filaTotal && desglose.every((r) => r.base !== null) && !cerca(sb, filaTotal.base, 0.02))
+        avisos.push(`La suma de las bases del desglose (${sb.toFixed(2)}) no coincide con su total (${filaTotal.base.toFixed(2)}).`);
+      // la fila TOTAL del desglose no es el total de la factura
+      if (filaTotal && d.total !== null && cerca(d.total, filaTotal.base, 0.001)) {
+        const otros = p.map((l, i) => i).filter((i) => i !== filaTotal.i && K.total.test(p[i]) && !K.noTotal.test(p[i]))
+          .map((i) => importeTrasClave(lineas, i, K.total)).filter((v) => v !== null);
+        d.total = otros.length ? Math.max(...otros) : null;
+      }
+      // total en letra grande mal leído: si no cuadra con base + IVA del desglose, se calcula
+      const calc = red2(d.base_imponible + d.cuota_iva);
+      if (d.base_imponible !== null && d.cuota_iva !== null && (d.total === null || !cerca(d.total, calc, 0.05))) {
+        if (d.total !== null) avisos.push(`El total leído (${d.total.toFixed(2)}) no cuadra con base + IVA del desglose; se usa ${calc.toFixed(2)}: revísalo.`);
+        d.total = calc;
+      }
+    }
+
     // Cuadrar base + IVA = total, completando el dato que falte
     const { base_imponible: b, cuota_iva: c, total: t } = d;
     const extra = (d.recargo_equivalencia || 0) + (d.otros_impuestos || 0) - (d.irpf || 0);
@@ -419,6 +465,7 @@
       .replace(/(\s\d+(?:[.,]\d+)?)\s+(?:und|uds|ud|un|u|cjs?)\.?(?=\s|$)/gi, "$1")   // "1,0000 Und" -> "1,0000"
       .replace(/\b(?:iva|igic|ipsi)\s+(?=\d{1,2}(?:[.,]\d+)?\s*%)/gi, "")                  // "IVA 21%" -> "21%"
       .replace(/\s*\((?:bienes|servicios)\)/gi, "")
+      .replace(/(\d)(?:\s+[^\d\s]{1,2})+\s*$/, "$1")                    // "1,85    E": marcas detrás del importe
       .replace(/\s(?:(?=\S*[=—_;|~])[=\-—_:;|.,'"~]+|[-.,:]{2,})(?=\s|$)/g, " ")   // "==", "-=-": manchas leídas como signos
       .replace(/(\s\d{1,4})-(\d{2})(?=\s|$)/g, "$1,$2")              // "3-75": coma leída como guion
       .trimEnd();
@@ -439,9 +486,9 @@
     // con un único número sin decimales hace falta algo más que lo confirme (p. ej. "Mano de obra   300")
     const final = nums[nums.length - 1];
     if (!final.decimales && nums.length === 1 && !final.columna) return null;
-    resto = resto.trim();
+    resto = resto.trim().replace(/^(?!\[[^\]]{1,20}\])(?:[|\]\[!}{¡]\s*|[lI]\s+(?=\d))(?=[A-ZÁÉÍÓÚÑ0-9])/, "");
     let cantidad = null, referencia = null;
-    const q = resto.match(/^(\d+(?:[.,]\d{1,3})?)\s*(?:x|uds?\.?|u\.|ud\.|kg|und\.?)?\s+(?=\D)/i);
+    const q = resto.match(/^(\d+(?:[.,]\d{1,3})?)\s*(?:x|uds?\.?|u\.|ud\.|kg|und\.?)?\s+(?=\D|\d+\s+[A-Za-zÁÉÍÓÚÑ])/i);
     if (q) { cantidad = parsearImporte(q[1]); resto = resto.slice(q[0].length); }
     // código de artículo al principio: "[MB670]", "TOR-440", "GR-2910201", "BE - BE0012-C545"
     const rc = resto.match(/^\[([^\]]{1,20})\]\s*/);
@@ -495,11 +542,18 @@
     const bruto = cantidad !== null && precio !== null ? cantidad * precio - (descuento || 0) : null;
     if (bruto !== null && !revisar && !cerca(bruto, importe, 0.021 + Math.abs(cantidad) * 0.00006)) {
       if (Number.isInteger(importe) && cerca(cantidad * precio, importe / 100, 0.02)) importe = red2(importe / 100);
+      else if (Number.isInteger(importe) && cerca(cantidad * precio, importe / 10, 0.02)) importe = red2(importe / 10);
       else if (Number.isInteger(precio) && cerca(cantidad * precio / 100, importe, 0.02)) precio = red2(precio / 100);
       else revisar = true;
     }
-    return { descripcion, referencia, cantidad, precio, descuento, importe, tipo_iva: tipo, revisar };
+    const enteroSuelto = !importeIlegible && !nums[nums.length - 1].decimales && Number.isInteger(importe);
+    // solo es sospechoso si no hay cantidad x precio que lo confirme ("Mano de obra  2  150  300" está bien)
+    const sinComa = enteroSuelto && (nums.length === 1 || revisar) ? String(importe) : null;
+    return { descripcion, referencia, cantidad, precio, descuento, importe, tipo_iva: tipo, revisar, sinComa };
   }
+
+  // Productos al peso: "Salmon Entero" y debajo "1,352 kg   10,95 €/kg   14,80"
+  const RE_PESO = /^\s*[|\]!]?\s*(\d+[.,]\d{1,3})\s*kgs?\.?\s*[x*]?\s+(\d+[.,]\d{1,4})\s*[€e]?\s*\/\s*kg\.?\s*=?\s+(\d+[.,]\d{2})\s*€?(?:\s+\S{1,2})*\s*$/i;
 
   const TIPOS_IVA = [0, 3, 4, 5, 7, 9.5, 10, 13.5, 15, 21];   // IVA, IGIC e IPSI
 
@@ -534,12 +588,51 @@
    *  (descripciones partidas en dos o más renglones). */
   function buscarProductos(lineasTexto) {
     const res = [];
-    let ultimo = null, extra = 0;
-    for (const l of lineasTexto) {
+    let ultimo = null, extra = 0, previa = null;
+    const esPeso = (i) => RE_PESO.test(lineasTexto[i] || "");
+    const esTique = lineasTexto.some((l) => /\b([fh]a[cl]?tura simplificada|ticket|tique)\b/i.test(quitarTildes(l)));
+    for (let n = 0; n < lineasTexto.length; n++) {
+      const l = lineasTexto[n];
+      // en un tique, a partir del TOTAL vienen el pago, el cambio y el desglose: no hay más productos
+      if (esTique && res.length && /^\s*total\b/i.test(l) && !/\b(art|uds|unidades|lineas)/i.test(l)) break;
+      if (!RE_PESO.test(l) && (esPeso(n + 1) || (esPeso(n + 2) && !importes(lineasTexto[n + 1] || "").length))) {
+        ultimo = null;   // es el nombre (o la categoría) de un producto al peso
+        if (esPeso(n + 1)) previa = l.trim().replace(/(?:\s+[^\w\s]{1,2})+$/, "");
+        continue;
+      }
+      const peso = l.match(RE_PESO);
+      if (peso && previa) {
+        let [cantidad, precio, leido] = [peso[1], peso[2], peso[3]].map(parsearImporte);
+        // precio por kilo con 3 decimales ("2,930"): sobra una cifra; se busca la que cuadra con el importe
+        if (/[.,]\d{3,}$/.test(peso[2]) && !cerca(red2(cantidad * precio), leido, 0.006)) {
+          const cifras = peso[2].replace(/\D/g, ""), ent = peso[2].split(/[.,]/)[0].length;
+          for (let k = ent; k < cifras.length; k++) {
+            const alt = +(cifras.slice(0, ent) + "." + (cifras.slice(ent, k) + cifras.slice(k + 1)));
+            if (cerca(red2(cantidad * alt), leido, 0.006)) { precio = alt; break; }
+          }
+        }
+        const calc = red2(cantidad * precio), ok = cerca(calc, leido, 0.006);
+        ultimo = { descripcion: previa.replace(/^\s*[|\]1]\s+/, "").replace(/\s{2,}/g, " ").trim(), referencia: null,
+          cantidad, precio, descuento: null, importe: ok ? leido : calc, tipo_iva: null, revisar: !ok };
+        res.push(ultimo); extra = 0; previa = null; continue;
+      }
       const prod = lineaProducto(l);
+      // posible descripción de un producto al peso (la línea de los kg va debajo)
+      previa = !prod && /[a-zñ]{3,}/i.test(l) && !importes(l).length && !esResumen(l) ? l.trim().replace(/(?:\s+[^\w\s]{1,2})+$/, "") : null;
       if (prod) { res.push(prod); ultimo = prod; extra = 0; continue; }
       const t = l.trim().replace(/(^|\s)(?:und|uds|ud)\.?(?=\s|$)/gi, " ").trim();
       if (ultimo && /^\d{1,4}$/.test(t) && /\s[xX]$/.test(ultimo.descripcion)) { ultimo.descripcion += " " + t; continue; }   // "… X" + "24"
+      // fila de producto sin importe legible: "1 FILM TRANSPARENTE  KC —" (o, en un tique, cualquier
+      // nombre en mayúsculas entre los productos: en los tiques las descripciones no ocupan dos renglones)
+      const filaTique = res.length && !importes(t).length && !esResumen(t) && !/:/.test(t) &&
+        (/^\s*[|\]]?\s*\d{1,3}\s+[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ0-9]+(?:\s+[A-ZÁÉÍÓÚÑ0-9\/.-]+)*/.test(t) && /\s{2,}\S/.test(t) ||
+         esTique && /^[|\]\s\d]*[A-ZÁÉÍÓÚÑ]{3,}(?:\s+[A-ZÁÉÍÓÚÑ0-9\/.-]+)+/.test(t));
+      if (filaTique) {
+        const cant = t.match(/^\s*[|\]]?\s*(\d{1,3})\s+/);
+        const desc = t.replace(/^\s*[|\]]?\s*\d{1,3}\s+/, "").replace(/^[|\]]\s*/, "").replace(/\s{2,}.*$/, "").trim();
+        ultimo = { descripcion: desc, referencia: null, cantidad: cant ? +cant[1] : 1, precio: null, descuento: null, importe: null, tipo_iva: null, revisar: true };
+        res.push(ultimo); extra = 0; continue;
+      }
       const conCodigo = RE_CODIGO.test(t) && /[a-zñ]{3,}/i.test(t);
       if (conCodigo && res.length && /\d/.test(t.replace(RE_CODIGO, ""))) {
         // fila de la tabla que no se ha podido interpretar: se añade para revisar a mano
@@ -561,16 +654,59 @@
   function lineas(lineasTexto, cab, avisos) {
     const res = buscarProductos(lineasTexto);
     if (!res.length) return res;
+    const conDecimales = res.filter((l) => l.importe !== null && !l.sinComa).length;
+    if (conDecimales >= res.length * 0.6) {
+      for (const l of res.filter((x) => x.sinComa)) {
+        // "195" en un tique donde todo lleva céntimos es "1,95": se corrige y se marca para revisar.
+        // "50" puede ser "1,50" o "0,50": no se sabe, se deja sin importe (y se calcula si es el único)
+        if (l.sinComa.length >= 3) l.importe = red2(l.importe / 100);
+        else { l.importe = null; l.precio = null; }
+        if (l.importe !== null && (l.cantidad === 1 || l.cantidad === null)) { l.precio = l.importe; l.cantidad = 1; }
+        l.revisar = true;
+      }
+    }
     const dudosas = res.filter((l) => l.revisar).map((l) => `«${l.descripcion}»`);
     if (dudosas.length) avisos.push(`Revisa ${dudosas.length === 1 ? "esta línea" : "estas líneas"} (cantidad × precio no cuadra con el importe o no se leyó bien): ${dudosas.slice(0, 8).join(", ")}${dudosas.length > 8 ? "…" : ""}.`);
     // ¿Los importes de las líneas llevan IVA? Se deduce comparando con la base y el total.
-    const suma = red2(res.reduce((a, l) => a + (l.importe || 0), 0));
+    let suma = red2(res.reduce((a, l) => a + (l.importe || 0), 0));
+    const sinImporte = res.filter((l) => l.importe === null);
+    // solo es fiable si todas las demás líneas están bien (ninguna marcada para revisar)
+    if (sinImporte.length === 1 && res.length > 2 && res.every((l) => l.importe === null || !l.revisar)) {
+      // si solo falta uno, es lo que le falta a la suma para llegar al total (o a la base)
+      const esTique = lineasTexto.some((l) => /\b([fh]a[cl]?tura simplificada|ticket|tique)\b/i.test(quitarTildes(l)));
+      const objetivo = esTique ? cab.total : (cab.base_imponible ?? cab.total);
+      if (objetivo !== null && objetivo - suma > 0) {
+        const l = sinImporte[0];
+        l.importe = red2(objetivo - suma);
+        if (l.cantidad) l.precio = red2(l.importe / l.cantidad);
+        suma = red2(objetivo);
+      }
+    }
+    // Un importe sin coma mal leído ("1555" por "1,55"): si quitando una cifra repetida la suma
+    // de las líneas cuadra con el total o la base, se corrige (y sigue marcado para revisar).
+    for (const objetivo of [cab.total, cab.base_imponible]) {
+      if (objetivo === null || cerca(suma, objetivo, 0.02)) continue;
+      const arreglos = [];
+      for (const l of res.filter((x) => x.sinComa && x.sinComa.length >= 4)) {
+        for (let k = 0; k < l.sinComa.length; k++) {
+          const alt = +(l.sinComa.slice(0, k) + l.sinComa.slice(k + 1)) / 100;
+          if (cerca(suma - l.importe + alt, objetivo, 0.02) && !arreglos.some((a) => a.l === l && a.alt === alt)) arreglos.push({ l, alt });
+        }
+      }
+      if (arreglos.length === 1) {
+        const { l, alt } = arreglos[0];
+        l.importe = alt; if (l.cantidad === 1) l.precio = alt;
+        suma = red2(res.reduce((a, x) => a + (x.importe || 0), 0));
+        break;
+      }
+    }
     const tipos = cab.tipo_iva ? cab.tipo_iva.split(" / ").map((t) => parsearImporte(t)) : [];
     const tipoUnico = tipos.length === 1 ? tipos[0] : null;
     let conIva = null;
     if (cab.base_imponible !== null && cerca(suma, cab.base_imponible, 0.1)) conIva = false;
     else if (cab.total !== null && cerca(suma, cab.total, 0.1)) conIva = true;
     else if (cab.total !== null && cab.base_imponible === null) conIva = true;  // típico de tiques
+    else if (lineasTexto.some((l) => /\b([fh]a[cl]?tura simplificada|ticket|tique)\b/i.test(quitarTildes(l)))) conIva = true;
     if (conIva === null) avisos.push("No se ha podido saber si los importes de las líneas llevan IVA; se han puesto como «sin IVA».");
     else if (cab.total !== null && !cerca(suma, conIva ? cab.total : cab.base_imponible, 0.1))
       avisos.push(`La suma de las líneas (${suma.toFixed(2)}) no cuadra: puede faltar o sobrar alguna línea.`);
@@ -586,6 +722,55 @@
         tipo_iva: t, importe: sin(l.importe), importe_iva: con(l.importe),
       };
     });
+  }
+
+  // ---------- reconstruir renglones a partir de las posiciones del OCR ----------
+  /** Tesseract a veces lee por columnas (todas las descripciones y luego todos los precios).
+   *  Con la caja (bbox) de cada línea que devuelve, se vuelven a juntar los trozos que están
+   *  a la misma altura, de izquierda a derecha, como renglones de la factura.
+   *  lineas: [{ palabras: [{ texto, x0, y0, x1, y1, confianza }] }] */
+  function renglonesOcr(lineas) {
+    const mediana = (v) => v.slice().sort((a, b) => a - b)[Math.floor(v.length / 2)];
+    const trozos = [];
+    for (const l of lineas) {
+      const ps = l.palabras.filter((w) => /[\p{L}\p{N}€%]/u.test(w.texto) || w.confianza >= 60)
+        .sort((a, b) => a.x0 - b.x0);
+      if (!ps.length) continue;
+      const h = Math.max(4, mediana(ps.map((w) => w.y1 - w.y0)));
+      let texto = ps[0].texto;
+      for (let i = 1; i < ps.length; i++) texto += (ps[i].x0 - ps[i - 1].x1 > h * 1.2 ? "    " : " ") + ps[i].texto;
+      trozos.push({ texto, x0: ps[0].x0, x1: ps[ps.length - 1].x1, yc: mediana(ps.map((w) => (w.y0 + w.y1) / 2)), h });
+    }
+    trozos.sort((a, b) => a.yc - b.yc);
+    const filas = [];
+    for (const t of trozos) {
+      // misma altura (con margen por si la foto está algo torcida) y sin pisarse en horizontal
+      const f = filas.find((r) => Math.abs(r.yc - t.yc) < 0.6 * Math.min(r.h, t.h) &&
+        !r.trozos.some((o) => o.x0 < t.x1 && t.x0 < o.x1));
+      if (f) f.trozos.push(t); else filas.push({ yc: t.yc, h: t.h, trozos: [t] });
+    }
+    return filas.sort((a, b) => a.yc - b.yc)
+      .map((r) => r.trozos.sort((a, b) => a.x0 - b.x0).map((t) => t.texto).join("    ")).join("\n");
+  }
+
+  /** Puntúa lo bien que se ha leído un texto, para elegir entre dos pasadas del OCR.
+   *  cuadra = la suma de las líneas coincide con la base o con el total. */
+  function puntuar(texto) {
+    const todos = { cabecera: ["numero_factura", "fecha", "emisor_nombre", "emisor_nif", "base_imponible", "cuota_iva", "total"],
+      linea: ["descripcion", "cantidad", "precio_unitario", "importe", "importe_iva"] };
+    const d = extraer(texto, todos);
+    if (d.vacio) return { puntos: 0, cuadra: false };
+    const ls = d.lineas || [];
+    const buenas = ls.filter((l) => l.importe !== null || l.importe_iva !== null).length;
+    const malas = (d.avisos.find((a) => a.startsWith("Revisa")) || "").split("«").length - 1;
+    const suma = (k) => ls.reduce((a, l) => a + (l[k] || 0), 0);
+    const cuadra = ls.length > 0 && [d.base_imponible, d.total].some((t) => t !== null &&
+      (cerca(suma("importe"), t, 0.05) || cerca(suma("importe_iva"), t, 0.05)));
+    const cab = todos.cabecera.filter((c) => d[c] !== null).length;
+    const objetivos = [d.base_imponible, d.total].filter((t) => t > 0);
+    const desvio = ls.length && objetivos.length ? Math.min(...objetivos.flatMap((t) =>
+      [suma("importe"), suma("importe_iva")].map((sm) => Math.abs(sm - t) / t))) : 0;
+    return { puntos: cab * 2 + buenas * 2 - malas * 2 + (cuadra ? 20 : 0) - Math.min(30, desvio * 30), cuadra };
   }
 
   // ---------- entrada principal ----------
@@ -617,5 +802,5 @@
     return salida;
   }
 
-  return { extraer, parsearImporte, nifValido, ibanValido, importes, lineaProducto, buscarProductos, esResumen, fechaDe };
+  return { extraer, puntuar, renglonesOcr, parsearImporte, nifValido, ibanValido, importes, lineaProducto, buscarProductos, esResumen, fechaDe };
 });
