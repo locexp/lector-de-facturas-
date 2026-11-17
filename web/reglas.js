@@ -623,7 +623,13 @@
     const enteroSuelto = !importeIlegible && !nums[nums.length - 1].decimales && Number.isInteger(importe);
     // solo es sospechoso si no hay cantidad x precio que lo confirme ("Mano de obra  2  150  300" está bien)
     const sinComa = enteroSuelto && (nums.length === 1 || revisar) ? String(importe) : null;
-    return { descripcion, referencia, cantidad, precio, descuento, importe, tipo_iva: tipo, revisar, sinComa };
+    // al peso en la misma línea: "PATATA  2,350 kg x 1,20 €/kg   2,82" o "1,5 kg ... 3,40 €/kg"
+    let kilos = null, precioKilo = null;
+    const pk = l.match(/(\d+[.,]\d{1,3})\s*kgs?\b.*?(\d+[.,]\d{1,4})\s*[€e]?\s*\/\s*kg/i);
+    const solo = l.match(/(\d+[.,]\d{1,4})\s*[€e]?\s*\/\s*kg/i);
+    if (pk) { kilos = parsearImporte(pk[1]); precioKilo = parsearImporte(pk[2]); }
+    else if (solo) precioKilo = parsearImporte(solo[1]);
+    return { descripcion, referencia, cantidad, precio, descuento, importe, tipo_iva: tipo, revisar, sinComa, kilos, precioKilo };
   }
 
   // Productos al peso: "Salmon Entero" y debajo "1,352 kg   10,95 €/kg   14,80"
@@ -687,7 +693,8 @@
         }
         const calc = red2(cantidad * precio), ok = cerca(calc, leido, 0.006);
         ultimo = { descripcion: previa.replace(/^\s*[|\]1]\s+/, "").replace(/\s{2,}/g, " ").trim(), referencia: null,
-          cantidad, precio, descuento: null, importe: ok ? leido : calc, tipo_iva: null, revisar: !ok };
+          cantidad, precio, descuento: null, importe: ok ? leido : calc, tipo_iva: null, revisar: !ok,
+          kilos: cantidad, precioKilo: precio };
         res.push(ultimo); extra = 0; previa = null; continue;
       }
       const prod = lineaProducto(l);
@@ -793,6 +800,9 @@
     else if (cab.total !== null && !cerca(suma, conIva ? cab.total : cab.base_imponible, 0.1))
       avisos.push(`La suma de las líneas (${suma.toFixed(2)}) no cuadra: puede faltar o sobrar alguna línea.`);
 
+    if (conIva && tipos.length > 1 && res.some((l) => l.tipo_iva === null && l.importe))
+      avisos.push(`Este tique lleva varios tipos de IVA (${cab.tipo_iva}) y no dice cuál es el de cada producto: ` +
+        "la base imponible de cada línea no se puede calcular (la base total de la factura sí está).");
     return res.map((l) => {
       const t = l.tipo_iva !== null ? l.tipo_iva : tipoUnico;
       const f = t !== null ? 1 + t / 100 : null;
@@ -802,6 +812,7 @@
         descripcion: l.descripcion, referencia: l.referencia, cantidad: l.cantidad,
         precio_unitario: sin(l.precio), precio_unitario_iva: con(l.precio), descuento: sin(l.descuento),
         tipo_iva: t, importe: sin(l.importe), importe_iva: con(l.importe),
+        kilos: l.kilos ?? null, precio_kilo: l.precioKilo ?? null,
       };
     });
   }

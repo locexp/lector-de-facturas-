@@ -482,3 +482,26 @@ test("marcas del margen delante del código de artículo", () => {
     assert.deepEqual([l.referencia, l.descripcion, l.cantidad, l.importe, l.tipo_iva], ["340070547", "*DOR CHI 099 - 1.70E", -5, -6.45, 10]);
   }
 });
+
+test("peso (kg) y precio por kilo de los productos al peso", () => {
+  const d = R.extraer(MERCADONA, { cabecera: [], linea: ["descripcion", "kilos", "precio_kilo", "importe_iva"] });
+  const peso = d.lineas.filter((l) => l.kilos !== null);
+  assert.deepEqual(peso, [
+    { descripcion: "Salmon Entero", kilos: 1.352, precio_kilo: 10.95, importe_iva: 14.8 },
+    { descripcion: "PIMIENTO ROJO", kilos: 0.252, precio_kilo: 2.9, importe_iva: 0.73 },
+    { descripcion: "CALABACIN VERDE", kilos: 0.378, precio_kilo: 1.9, importe_iva: 0.72 },
+    { descripcion: "BANANA", kilos: 0.968, precio_kilo: 1.55, importe_iva: 1.5 },
+  ]);
+  assert.deepEqual(d.lineas[0], { descripcion: "CEBOLLA TUBO", kilos: null, precio_kilo: null, importe_iva: 1.5 });
+  // en una sola línea
+  const l = R.lineaProducto("PATATA NUEVA  2,350 kg x 1,20 €/kg      2,82");
+  assert.deepEqual([l.kilos, l.precioKilo, l.importe], [2.35, 1.2, 2.82]);
+});
+
+test("base por línea: se calcula con un solo tipo de IVA y se explica si hay varios", () => {
+  const una = R.extraer(TIQUE, { cabecera: [], linea: ["descripcion", "importe", "importe_iva"] });
+  assert.deepEqual(una.lineas[1], { descripcion: "PAN BARRA", importe: 0.82, importe_iva: 0.9 });
+  const varias = R.extraer(MERCADONA, { cabecera: ["base_imponible"], linea: ["importe"] });
+  assert.equal(varias.base_imponible, 42.4);
+  assert.ok(varias.avisos.some((a) => /no dice cuál es el de cada producto/.test(a)), varias.avisos.join(" | "));
+});
