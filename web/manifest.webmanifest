@@ -1,0 +1,10 @@
+{
+  "name": "Lector de facturas",
+  "short_name": "Facturas",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f3f5f8",
+  "theme_color": "#1f5f9a",
+  "icons": [{"src": "/static/icono.svg", "sizes": "any", "type": "image/svg+xml"}]
+}
