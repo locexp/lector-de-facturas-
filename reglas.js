@@ -26,11 +26,11 @@
       const dec = coma > punto ? "," : ".";
       s = s.split(dec === "," ? "." : ",").join("").replace(dec, ".");
     } else if (coma >= 0) {
-      s = /,\d{1,2}$/.test(s) ? s.replace(/,/g, (m, i) => (i === coma ? "." : "")) : s.replace(/,/g, "");
+      // una sola coma = decimal (estilo español, también "13,0200"); varias = separador de miles
+      s = s.indexOf(",") === coma ? s.replace(",", ".") : s.replace(/,/g, "");
     } else if (punto >= 0) {
-      // un solo punto con 1-2 decimales = decimal; con 3 cifras detrás = miles (estilo español)
-      if (!/\.\d{1,2}$/.test(s)) s = s.replace(/\./g, "");
-      else s = s.replace(/\.(?=.*\.)/g, "");
+      // un solo punto con 3 cifras detrás = miles ("1.234"); con 1-2 o 4 cifras = decimal
+      s = s.indexOf(".") !== punto || /\.\d{3}$/.test(s) ? s.replace(/\./g, "") : s;
     }
     const n = Number(s);
     return Number.isFinite(n) ? (negativo ? -n : n) : null;
@@ -237,9 +237,14 @@
     // Nombres
     const iniCliente = p.findIndex((l) => K.cliente.test(l));
     const finEmisor = iniCliente > 0 ? iniCliente : Math.min(lineas.length, emi ? emi.linea + 3 : 8);
-    d.emisor_nombre = nombreCerca(lineas, emi ? emi.linea - 3 : 0, emi ? emi.linea + 3 : finEmisor) ||
-      limpiarNombre(lineas.find((l, i) => i < finEmisor && /[a-zñ]{3,}/i.test(l) &&
-        !/factura|ticket|tique|fecha|n[º°]|nif|cif|tel|@|www/i.test(l)) || "");
+    // nombre con forma jurídica (S.L., S.A...) cerca del CIF del emisor; si no, en cualquier
+    // sitio fuera del bloque del cliente; si no, la primera línea con texto que no sea una etiqueta
+    const enBloqueCliente = (i) => iniCliente >= 0 && i >= iniCliente && i <= iniCliente + 4;
+    d.emisor_nombre = (emi && nombreCerca(lineas, emi.linea - 3, emi.linea + 3)) ||
+      (emi && nombreCerca(lineas, emi.linea - 7, emi.linea + 3)) ||
+      limpiarNombre(lineas.find((l, i) => !enBloqueCliente(i) && K.nombreEmpresa.test(plano(l).trim().replace(/,/g, ""))) || "") ||
+      limpiarNombre(lineas.find((l, i) => i < finEmisor && /[a-zñ]{3,}/i.test(l) && !/:/.test(l) &&
+        !/factura|ticket|tique|fecha|n[º°]|nif|cif|tel|@|www|albar/i.test(l)) || "");
     if (iniCliente >= 0) {
       const enLinea = limpiarNombre(lineas[iniCliente].replace(/^.*?(cliente|destinatario|facturar a)\s*[:.]?/i, ""));
       d.cliente_nombre = (enLinea && /[a-z]{3,}/i.test(enLinea) ? enLinea : null) ||
@@ -345,7 +350,7 @@
   }
 
   // ---------- líneas de producto ----------
-  const RE_NUM_FINAL = /(\s+|^)(-?\d{1,3}(?:[.]\d{3})*(?:[.,]\d{1,3})?|-?\d+(?:[.,]\d{1,3})?)(\s*%)?\s*(?:€|eur)?\s*$/i;
+  const RE_NUM_FINAL = /(\s+|^)(-?\d{1,3}(?:[.]\d{3})*(?:[.,]\d{1,4})?|-?\d+(?:[.,]\d{1,4})?)(\s*%)?\s*(?:€|eur)?\s*$/i;
 
   // Palabras de totales, pagos, cabeceras de tabla y datos de la factura. Una línea solo se
   // descarta si, quitando estas palabras, no le queda ninguna otra ("Cambio 5,00" sí se
@@ -360,7 +365,7 @@
     "euro euros articulos articulo unidades uds lineas items impuesto impuestos exento exenta incluido incl " +
     "descuento descuentos dto ahorro ahorrado puntos tipo neto bruto liquido ref referencia descripcion concepto " +
     "conceptos cant cantidad precio precios unidad unitario unit pvp calle avda avenida plaza paseo ctra carretera " +
-    "cajero cajera atendido vendedor tienda caja establecimiento observaciones notas registro mercantil tomo folio hoja"
+    "und lote caducidad cad dtos lineas peso kg transportista agente zona albaran pedido cajero cajera atendido vendedor tienda caja establecimiento observaciones notas registro mercantil tomo folio hoja"
   ).split(" "));
   const PALABRAS_VACIAS = new Set("por para del las los con sin que una uno sus les nos ese esa este esta".split(" "));
 
@@ -374,10 +379,10 @@
   function numerosFinales(linea) {
     let resto = linea, m, tipo = null;
     const nums = [];
-    while (nums.length < 4 && (m = resto.match(RE_NUM_FINAL))) {
+    while (nums.length < 6 && (m = resto.match(RE_NUM_FINAL))) {
       const n = parsearImporte(m[2]);
       if (n === null) break;
-      const decimales = /[.,]\d{1,3}$/.test(m[2]) && !/^\d{1,3}\.\d{3}$/.test(m[2].replace("-", ""));
+      const decimales = /[.,]\d{1,4}$/.test(m[2]) && !/^\d{1,3}\.\d{3}$/.test(m[2].replace("-", ""));
       const columna = m[1].length >= 2 || m.index === 0;   // separado por varios espacios = otra columna
       if (m[3]) { tipo = n; resto = resto.slice(0, m.index).trimEnd(); continue; }
       if (!decimales) {
@@ -405,7 +410,11 @@
 
   function lineaProducto(l) {
     if (!/[a-zñ]{3,}/i.test(l) || /@|www\.|https?:/i.test(l)) return null;
-    const limpia = l.replace(/\s*€\s*/g, "  ").replace(/\s+[A-E]\s*$/, "").trimEnd();  // códigos de IVA tipo "A" al final
+    const limpia = l.replace(/\s*€\s*/g, "  ").replace(/\s+[A-E]\s*$/, "")   // códigos de IVA tipo "A" al final
+      .replace(/(\s\d+(?:[.,]\d+)?)\s+(?:und|uds|ud|un|u|cjs?)\.?(?=\s|$)/gi, "$1")   // "1,0000 Und" -> "1,0000"
+      .replace(/\s(?:(?=\S*[=—_;|~])[=\-—_:;|.,'"~]+|[-.,:]{2,})(?=\s|$)/g, " ")   // "==", "-=-": manchas leídas como signos
+      .replace(/(\s\d{1,4})-(\d{2})(?=\s|$)/g, "$1,$2")              // "3-75": coma leída como guion
+      .trimEnd();
     let { nums, tipo, resto } = numerosFinales(limpia);
     let importeIlegible = false;
     if (!nums.length || !nums[nums.length - 1].decimales) {
@@ -427,11 +436,19 @@
     let cantidad = null, referencia = null;
     const q = resto.match(/^(\d+(?:[.,]\d{1,3})?)\s*(?:x|uds?\.?|u\.|ud\.|kg|und\.?)?\s+(?=\D)/i);
     if (q) { cantidad = parsearImporte(q[1]); resto = resto.slice(q[0].length); }
-    const r = resto.match(/^([A-Z0-9][A-Z0-9\-.\/]{3,})\s+(?=[A-Za-zÁÉÍÓÚÑáéíóúñ])/i);
+    // código de artículo al principio: "TOR-440", "GR-2910201", "BE - BE0012-C545"
+    const r = resto.match(/^([A-Z0-9]{1,6}(?:\s?[-\/]\s?[A-Z0-9]+)+|[A-Z0-9][A-Z0-9\-.\/]{3,})\s+(?=[A-Za-zÁÉÍÓÚÑáéíóúñ])/i);
     if (r && /\d/.test(r[1])) { referencia = r[1]; resto = resto.slice(r[0].length); }
     // "2 x 1,05" dentro de la descripción
     const x = resto.match(/\s(\d+(?:[.,]\d{1,3})?)\s*[xX*]\s*$/);
     if (x && cantidad === null) { cantidad = parsearImporte(x[1]); resto = resto.slice(0, x.index); }
+    // columnas de lote y caducidad entre la descripción y los números: "… Cx12  202609  17-02-2027"
+    const cad = resto.match(/\s+\d{1,2}[\/\-.]\d{1,2}[\/\-.](?:\d{4}|\d{2})?\s*$/);
+    if (cad) {
+      resto = resto.slice(0, cad.index);
+      const lote = resto.match(/\s+(?=\S*\d{3})[A-Z0-9\/\-.]{3,}\s*$/i);
+      if (lote && !/[a-z]{2,}/.test(lote[0])) resto = resto.slice(0, lote.index);
+    }
     const descripcion = resto.replace(/[\s.:\-_|]+$/, "").replace(/\s{2,}/g, " ").trim();
     if (!/[a-zñ]{3,}/i.test(descripcion) || esResumen(descripcion)) return null;
     if (buscarNifs([descripcion]).some((n) => n.valido)) return null;   // datos del cliente/emisor
@@ -439,31 +456,70 @@
     const v = nums.map((o) => o.n);
     if (importeIlegible) v.push(null);
     let importe = v[v.length - 1];
-    let precio = null;
+    let precio = null, descuento = null, revisar = importeIlegible;
     if (importeIlegible) {
       precio = v[v.length - 2];
       if (cantidad === null) cantidad = v.length >= 3 ? v[v.length - 3] : 1;
       importe = red2(cantidad * precio);
     } else if (cantidad !== null) {
       precio = v.length >= 2 ? v[v.length - 2] : red2(importe / (cantidad || 1));
-    } else if (v.length >= 3) {
-      [cantidad, precio] = v;
-    } else if (v.length === 2) {
-      if (!nums[0].decimales && Number.isInteger(v[0]) && v[0] <= 999 && !cerca(v[0], importe, 0.001)) {
-        cantidad = v[0]; precio = red2(importe / (cantidad || 1));
-      } else { precio = v[0]; const c = importe / precio; cantidad = cerca(c, Math.round(c), 0.02) ? Math.round(c) : null; }
-    } else { cantidad = 1; precio = importe; }
+    } else {
+      const par = buscarCantidadPrecio(v.slice(0, -1), importe);
+      if (par) {
+        ({ cantidad, precio, descuento } = par);
+        if (tipo === null && par.tipo !== null) tipo = par.tipo;
+      } else if (v.length >= 4) {
+        // no cuadra ninguna combinación: el precio es el número cuya división da una cantidad entera
+        const p = v.slice(0, -1).reverse().find((n) => n > 0 && n !== importe && cerca(importe / n, Math.round(importe / n), 0.01) && importe / n <= 999);
+        if (p) { precio = p; cantidad = Math.round(importe / p); } else revisar = true;
+      } else if (v.length === 3) {
+        [cantidad, precio] = v;
+      } else if (v.length === 2) {
+        if (!nums[0].decimales && Number.isInteger(v[0]) && v[0] <= 999 && !cerca(v[0], importe, 0.001)) {
+          cantidad = v[0]; precio = red2(importe / (cantidad || 1));
+        } else { precio = v[0]; const c = importe / precio; cantidad = cerca(c, Math.round(c), 0.02) ? Math.round(c) : null; }
+      } else { cantidad = 1; precio = importe; }
+    }
 
     // Comprobación cantidad x precio = importe: corrige la coma perdida por el OCR
     // ("2,25" leído "225") y marca para revisar lo que no cuadre.
-    let revisar = importeIlegible;
-    if (cantidad !== null && precio !== null && !importeIlegible && !cerca(cantidad * precio, importe, 0.02)) {
+    const bruto = cantidad !== null && precio !== null ? cantidad * precio - (descuento || 0) : null;
+    if (bruto !== null && !revisar && !cerca(bruto, importe, 0.021 + Math.abs(cantidad) * 0.00006)) {
       if (Number.isInteger(importe) && cerca(cantidad * precio, importe / 100, 0.02)) importe = red2(importe / 100);
       else if (Number.isInteger(precio) && cerca(cantidad * precio / 100, importe, 0.02)) precio = red2(precio / 100);
       else revisar = true;
     }
-    return { descripcion, referencia, cantidad, precio, importe, tipo_iva: tipo, revisar };
+    return { descripcion, referencia, cantidad, precio, descuento, importe, tipo_iva: tipo, revisar };
   }
+
+  const TIPOS_IVA = [0, 3, 4, 5, 7, 9.5, 10, 13.5, 15, 21];   // IVA, IGIC e IPSI
+
+  /** Entre los números de la línea (sin el importe), busca cantidad x precio (- % dto) = importe.
+   *  Lo que queda detrás del precio puede ser el % de descuento y el % de IVA. */
+  function buscarCantidadPrecio(nums, importe) {
+    for (let i = 0; i < nums.length; i++) {
+      const tol = 0.021 + Math.abs(nums[i]) * 0.00006;
+      for (let j = i + 1; j < nums.length; j++) {
+        const bruto = nums[i] * nums[j];
+        const resto = nums.slice(j + 1);
+        let descuento = null, ok = cerca(bruto, importe, tol);
+        if (!ok) {
+          const k = resto.findIndex((d) => d > 0 && d < 100 && cerca(bruto * (1 - d / 100), importe, tol));
+          if (k < 0) continue;
+          descuento = red2(bruto - importe);
+          resto.splice(k, 1);
+        } else {
+          const k = resto.findIndex((d) => d === 0);   // "0,00" en la columna de % dto
+          if (k >= 0 && resto.length > 1) resto.splice(k, 1);
+        }
+        const tipo = resto.find((t) => TIPOS_IVA.includes(t)) ?? null;
+        return { cantidad: nums[i], precio: nums[j], descuento, tipo };
+      }
+    }
+    return null;
+  }
+
+  const RE_CODIGO = /^([A-Z0-9]{1,6}(?:\s?[-\/]\s?[A-Z0-9]+)+)\s+(?=[A-Za-zÁÉÍÓÚÑáéíóúñ])/i;
 
   /** Recorre el texto: cada línea de producto, más los renglones sin importe que la siguen
    *  (descripciones partidas en dos o más renglones). */
@@ -474,7 +530,17 @@
       const prod = lineaProducto(l);
       if (prod) { res.push(prod); ultimo = prod; extra = 0; continue; }
       const t = l.trim();
-      const continuacion = ultimo && extra < 3 && /[a-zñ]{3,}/i.test(t) && !/[:@]/.test(t) &&
+      const conCodigo = RE_CODIGO.test(t) && /[a-zñ]{3,}/i.test(t);
+      if (conCodigo && res.length && /\d/.test(t.replace(RE_CODIGO, ""))) {
+        // fila de la tabla que no se ha podido interpretar: se añade para revisar a mano
+        const ref = t.match(RE_CODIGO)[1];
+        const desc = t.slice(t.match(RE_CODIGO)[0].length).replace(/\s{2,}.*$/, "").trim();
+        if (!esResumen(desc)) {
+          ultimo = { descripcion: desc, referencia: ref, cantidad: null, precio: null, descuento: null, importe: null, tipo_iva: null, revisar: true };
+          res.push(ultimo); extra = 0; continue;
+        }
+      }
+      const continuacion = ultimo && extra < 3 && !conCodigo && /[a-zñ]{3,}/i.test(t) && !/[:@]/.test(t) &&
         !importes(t).length && !/\s{2,}[\d.,]+\s*$/.test(l) && !esResumen(t) && !buscarNifs([t]).length && !fechaDe(t);
       if (continuacion) { ultimo.descripcion += " " + t.replace(/\s{2,}/g, " "); extra++; }
       else ultimo = null;   // cualquier otra cosa corta la descripción
@@ -488,7 +554,7 @@
     const dudosas = res.filter((l) => l.revisar).map((l) => `«${l.descripcion}»`);
     if (dudosas.length) avisos.push(`Revisa ${dudosas.length === 1 ? "esta línea" : "estas líneas"} (cantidad × precio no cuadra con el importe o no se leyó bien): ${dudosas.slice(0, 8).join(", ")}${dudosas.length > 8 ? "…" : ""}.`);
     // ¿Los importes de las líneas llevan IVA? Se deduce comparando con la base y el total.
-    const suma = red2(res.reduce((a, l) => a + l.importe, 0));
+    const suma = red2(res.reduce((a, l) => a + (l.importe || 0), 0));
     const tipos = cab.tipo_iva ? cab.tipo_iva.split(" / ").map((t) => parsearImporte(t)) : [];
     const tipoUnico = tipos.length === 1 ? tipos[0] : null;
     let conIva = null;
@@ -506,7 +572,7 @@
       const con = (v) => (v === null ? null : conIva ? v : (f ? red2(v * f) : null));
       return {
         descripcion: l.descripcion, referencia: l.referencia, cantidad: l.cantidad,
-        precio_unitario: sin(l.precio), precio_unitario_iva: con(l.precio), descuento: null,
+        precio_unitario: sin(l.precio), precio_unitario_iva: con(l.precio), descuento: sin(l.descuento),
         tipo_iva: t, importe: sin(l.importe), importe_iva: con(l.importe),
       };
     });

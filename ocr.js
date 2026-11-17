@@ -14,7 +14,9 @@
     pdf: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js",
     pdfWorker: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js",
   };
-  const LADO_MIN = 1600, LADO_MAX = 2600;   // tamaño de imagen con el que Tesseract lee mejor
+  // Tesseract lee bien con letras de ~25 px: se lleva el lado corto de la foto a ~2800 px
+  // (agrandando las fotos pequeñas) sin pasar de 14 Mpx, el máximo seguro en móviles.
+  const LADO_CORTO = 2800, MAX_PIXELES = 14e6;
 
   const scripts = {};
   function cargarScript(url) {
@@ -28,6 +30,8 @@
   }
 
   let trabajador = null, avisar = () => {};
+  // Para avisar de fotos malas: lado corto más pequeño de las fotos y peor confianza del OCR (0-100)
+  let calidad = { ladoCorto: Infinity, confianza: 100 };
   async function obtenerTrabajador() {
     if (!trabajador) {
       trabajador = (async () => {
@@ -48,11 +52,13 @@
   async function prepararImagen(fuente) {
     const bmp = fuente instanceof HTMLCanvasElement ? fuente
       : await createImageBitmap(fuente, { imageOrientation: "from-image" });
-    const lado = Math.max(bmp.width, bmp.height);
-    const k = lado < LADO_MIN ? LADO_MIN / lado : lado > LADO_MAX ? LADO_MAX / lado : 1;
+    const corto = Math.min(bmp.width, bmp.height);
+    if (!(fuente instanceof HTMLCanvasElement)) calidad.ladoCorto = Math.min(calidad.ladoCorto, corto);
+    const k = Math.min(LADO_CORTO / corto, Math.sqrt(MAX_PIXELES / (bmp.width * bmp.height)));
     const c = document.createElement("canvas");
     c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
     const ctx = c.getContext("2d", { willReadFrequently: true });
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
     ctx.drawImage(bmp, 0, 0, c.width, c.height);
     const img = ctx.getImageData(0, 0, c.width, c.height), px = img.data;
     // gris + estirar el contraste entre los percentiles 2 y 98 (fotos con poca luz)
@@ -82,6 +88,7 @@
     };
     const w = await obtenerTrabajador();
     const { data } = await w.recognize(lienzo);
+    calidad.confianza = Math.min(calidad.confianza, data.confidence);
     return data.text || "";
   }
 
@@ -96,7 +103,7 @@
       const pag = await pdf.getPage(n);
       const contenido = await pag.getTextContent();
       const texto = lineasPdf(contenido.items);
-      if (texto.replace(/\s/g, "").length > 40) { textos.push(texto); continue; }
+      if (texto.replace(/\s/g, "").length > 40) { textos.push(texto); continue; }   // PDF con texto: sin OCR
       const vista = pag.getViewport({ scale: 2.5 });
       const c = document.createElement("canvas");
       c.width = vista.width; c.height = vista.height;
@@ -129,6 +136,7 @@
 
   /** ficheros -> texto de la factura completa (todas las páginas). */
   async function leerTexto(ficheros, progreso = () => {}) {
+    calidad = { ladoCorto: Infinity, confianza: 100 };
     const textos = [];
     let i = 0;
     for (const f of ficheros) {
@@ -145,5 +153,17 @@
     return textos.join("\n");
   }
 
-  window.LectorGratis = { leerTexto, CDN };
+  /** Aviso para el usuario si la lectura ha salido mal (pobre = pocos datos encontrados), o null. */
+  function avisoCalidad(pobre) {
+    if (!pobre) return null;
+    const motivos = [];
+    if (calidad.ladoCorto < 1400) motivos.push(`la foto es pequeña (${calidad.ladoCorto} px de ancho; las fotos reenviadas por WhatsApp pierden resolución)`);
+    if (calidad.confianza < 75) motivos.push("el texto se ha leído con dificultad (foto borrosa, inclinada, con sombras o arrugada)");
+    return "Lectura de baja calidad" + (motivos.length ? `: ${motivos.join("; ")}` : "") +
+      ". Para mejorar: usa la foto original de la cámara, acércate hasta que la factura llene la foto " +
+      "(si es grande o muy larga, hazla en dos fotos —arriba y abajo— y añade las dos), con buena luz " +
+      "y la hoja plana, o usa el modo IA.";
+  }
+
+  window.LectorGratis = { leerTexto, avisoCalidad, CDN };
 })();
