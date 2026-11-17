@@ -1,0 +1,191 @@
+{
+ "cabecera": [
+  {
+   "clave": "numero_factura",
+   "etiqueta": "Nº de factura",
+   "tipo": "texto",
+   "pista": "Número o código de la factura"
+  },
+  {
+   "clave": "fecha",
+   "etiqueta": "Fecha",
+   "tipo": "fecha",
+   "pista": "Fecha de emisión, en formato AAAA-MM-DD"
+  },
+  {
+   "clave": "emisor_nombre",
+   "etiqueta": "Emisor (nombre)",
+   "tipo": "texto",
+   "pista": "Razón social o nombre de quien emite la factura (el vendedor)"
+  },
+  {
+   "clave": "emisor_nif",
+   "etiqueta": "NIF / CIF emisor",
+   "tipo": "texto",
+   "pista": "NIF, CIF o NIE del emisor, sin espacios ni guiones"
+  },
+  {
+   "clave": "emisor_direccion",
+   "etiqueta": "Dirección emisor",
+   "tipo": "texto",
+   "pista": "Dirección completa del emisor"
+  },
+  {
+   "clave": "cliente_nombre",
+   "etiqueta": "Cliente (nombre)",
+   "tipo": "texto",
+   "pista": "Nombre o razón social del cliente/destinatario"
+  },
+  {
+   "clave": "cliente_nif",
+   "etiqueta": "NIF / CIF cliente",
+   "tipo": "texto",
+   "pista": "NIF, CIF o NIE del cliente, sin espacios ni guiones"
+  },
+  {
+   "clave": "base_imponible",
+   "etiqueta": "Base imponible",
+   "tipo": "numero",
+   "pista": "Suma de bases imponibles (total sin impuestos)"
+  },
+  {
+   "clave": "tipo_iva",
+   "etiqueta": "% IVA",
+   "tipo": "texto",
+   "pista": "Tipo o tipos de IVA aplicados, p. ej. \"21\" o \"10 / 21\""
+  },
+  {
+   "clave": "cuota_iva",
+   "etiqueta": "Cuota IVA",
+   "tipo": "numero",
+   "pista": "Importe total del IVA"
+  },
+  {
+   "clave": "recargo_equivalencia",
+   "etiqueta": "Recargo de equivalencia",
+   "tipo": "numero",
+   "pista": "Importe total del recargo de equivalencia"
+  },
+  {
+   "clave": "irpf",
+   "etiqueta": "Retención IRPF",
+   "tipo": "numero",
+   "pista": "Importe de la retención de IRPF (positivo aunque reste)"
+  },
+  {
+   "clave": "otros_impuestos",
+   "etiqueta": "Otros impuestos",
+   "tipo": "numero",
+   "pista": "Importe de otros impuestos (IGIC, IPSI, tasas...)"
+  },
+  {
+   "clave": "descuento",
+   "etiqueta": "Descuento",
+   "tipo": "numero",
+   "pista": "Descuento total aplicado a la factura"
+  },
+  {
+   "clave": "total",
+   "etiqueta": "Total factura",
+   "tipo": "numero",
+   "pista": "Importe total a pagar"
+  },
+  {
+   "clave": "moneda",
+   "etiqueta": "Moneda",
+   "tipo": "texto",
+   "pista": "Código ISO de la moneda, p. ej. EUR"
+  },
+  {
+   "clave": "forma_pago",
+   "etiqueta": "Forma de pago",
+   "tipo": "texto",
+   "pista": "Forma de pago (efectivo, tarjeta, transferencia...)"
+  },
+  {
+   "clave": "iban",
+   "etiqueta": "IBAN",
+   "tipo": "texto",
+   "pista": "IBAN o cuenta bancaria para el pago, sin espacios"
+  },
+  {
+   "clave": "vencimiento",
+   "etiqueta": "Vencimiento",
+   "tipo": "fecha",
+   "pista": "Fecha de vencimiento, en formato AAAA-MM-DD"
+  }
+ ],
+ "linea": [
+  {
+   "clave": "descripcion",
+   "etiqueta": "Descripción",
+   "tipo": "texto",
+   "pista": "Descripción del producto o servicio"
+  },
+  {
+   "clave": "referencia",
+   "etiqueta": "Referencia / código",
+   "tipo": "texto",
+   "pista": "Código o referencia del artículo"
+  },
+  {
+   "clave": "cantidad",
+   "etiqueta": "Cantidad",
+   "tipo": "numero",
+   "pista": "Unidades, kilos, horas..."
+  },
+  {
+   "clave": "precio_unitario",
+   "etiqueta": "Precio unitario (sin IVA)",
+   "tipo": "numero",
+   "pista": "Precio por unidad antes de impuestos"
+  },
+  {
+   "clave": "precio_unitario_iva",
+   "etiqueta": "Precio unitario con IVA",
+   "tipo": "numero",
+   "pista": "Precio por unidad con impuestos incluidos"
+  },
+  {
+   "clave": "descuento",
+   "etiqueta": "Descuento línea",
+   "tipo": "numero",
+   "pista": "Descuento aplicado a la línea (importe)"
+  },
+  {
+   "clave": "tipo_iva",
+   "etiqueta": "% IVA línea",
+   "tipo": "numero",
+   "pista": "Porcentaje de IVA de la línea, p. ej. 21"
+  },
+  {
+   "clave": "importe",
+   "etiqueta": "Importe (sin IVA)",
+   "tipo": "numero",
+   "pista": "Importe de la línea antes de impuestos"
+  },
+  {
+   "clave": "importe_iva",
+   "etiqueta": "Importe con IVA",
+   "tipo": "numero",
+   "pista": "Importe de la línea con impuestos incluidos"
+  }
+ ],
+ "por_defecto": {
+  "cabecera": [
+   "numero_factura",
+   "fecha",
+   "emisor_nombre",
+   "emisor_nif",
+   "base_imponible",
+   "cuota_iva",
+   "total"
+  ],
+  "linea": [
+   "descripcion",
+   "cantidad",
+   "precio_unitario",
+   "importe"
+  ]
+ }
+}

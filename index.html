@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f5f9a">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icono.svg">
+<link rel="apple-touch-icon" href="icono.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Lector de facturas</title>
+<style>
+  :root {
+    --fondo: #f3f5f8; --tarjeta: #ffffff; --texto: #1b2230; --suave: #5d6878;
+    --borde: #dde2ea; --acento: #1f5f9a; --acento-texto: #ffffff; --acento-suave: #e3eef9;
+    --error: #b3261e; --aviso-fondo: #fff4e0; --aviso-texto: #7a4b00; --error-fondo: #fdecea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fondo: #10141b; --tarjeta: #1a2029; --texto: #e6eaf0; --suave: #9aa5b5;
+      --borde: #2b3442; --acento: #6aaee8; --acento-texto: #0b1622; --acento-suave: #1d3047;
+      --error: #ff8a80; --aviso-fondo: #3a2c12; --aviso-texto: #ffd08a; --error-fondo: #3a1f1d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--fondo); color: var(--texto);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.4rem; margin: 8px 0 2px; display: flex; align-items: center; gap: 10px; }
+  h1 img { width: 32px; height: 32px; }
+  h2 { font-size: 1.05rem; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+  h2 .paso { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--acento); color: var(--acento-texto); font-size: .8rem; }
+  h3 { font-size: .9rem; margin: 14px 0 8px; color: var(--suave); text-transform: uppercase; letter-spacing: .04em; }
+  .sub { color: var(--suave); margin: 0 0 16px; font-size: .95rem; }
+  .sub a { color: var(--acento); }
+  .tarjeta { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+  .ayuda { color: var(--suave); font-size: .85rem; margin: 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { position: relative; }
+  .chip input { position: absolute; opacity: 0; inset: 0; }
+  .chip span {
+    display: inline-block; padding: 8px 12px; border-radius: 999px; border: 1px solid var(--borde);
+    font-size: .9rem; user-select: none; cursor: pointer; background: var(--fondo);
+  }
+  .chip input:checked + span { background: var(--acento); border-color: var(--acento); color: var(--acento-texto); }
+  .chip input:checked + span::before { content: "✓ "; }
+  .chip input:focus-visible + span { outline: 2px solid var(--acento); outline-offset: 2px; }
+  .atajos { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .boton {
+    font: inherit; font-weight: 600; padding: 10px 14px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--acento); color: var(--acento); background: transparent; text-decoration: none; text-align: center;
+  }
+  .boton.peq { padding: 6px 10px; font-size: .85rem; }
+  .boton.lleno { background: var(--acento); color: var(--acento-texto); }
+  .boton:disabled { opacity: .5; cursor: default; }
+  .captura { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+  .captura label { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 18px 8px; font-size: .95rem; }
+  .captura label b { font-size: 1.6rem; line-height: 1; }
+  .captura input { display: none; }
+  .paginas { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .pagina { position: relative; width: 76px; height: 100px; border-radius: 8px; border: 1px solid var(--borde); overflow: hidden; background: var(--fondo); display: grid; place-items: center; font-size: .75rem; color: var(--suave); text-align: center; }
+  .pagina img { width: 100%; height: 100%; object-fit: cover; }
+  .pagina button { position: absolute; top: 3px; right: 3px; width: 24px; height: 24px; border-radius: 50%; border: 0; background: rgba(0,0,0,.65); color: #fff; font-size: 14px; line-height: 1; cursor: pointer; }
+  .principal { width: 100%; margin-top: 14px; padding: 15px; font-size: 1.05rem; font-weight: 700; border: 0; border-radius: 12px; background: var(--acento); color: var(--acento-texto); cursor: pointer; }
+  .principal:disabled { opacity: .55; cursor: default; }
+  .barra { height: 6px; border-radius: 3px; background: var(--borde); overflow: hidden; margin-top: 12px; display: none; }
+  .barra div { height: 100%; width: 30%; background: var(--acento); animation: ir 1.2s infinite ease-in-out; }
+  @keyframes ir { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+  .error { background: var(--error-fondo); color: var(--error); border-radius: 10px; padding: 10px 12px; font-size: .9rem; margin-top: 12px; }
+  .avisos { background: var(--aviso-fondo); color: var(--aviso-texto); border-radius: 10px; padding: 8px 12px 8px 28px; font-size: .88rem; margin: 10px 0 0; }
+  .barra-res { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .barra-res .boton { flex: 1 1 40%; }
+  .factura header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .factura header strong { font-size: 1rem; flex: 1; }
+  .datos { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 12px; }
+  .datos label { display: block; font-size: .78rem; color: var(--suave); }
+  input.campo {
+    width: 100%; font: inherit; font-size: .95rem; color: inherit; background: var(--fondo);
+    border: 1px solid var(--borde); border-radius: 8px; padding: 7px 9px; margin-top: 2px;
+  }
+  input.campo.vacio { border-style: dashed; }
+  .tabla-caja { overflow-x: auto; margin-top: 12px; border: 1px solid var(--borde); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+  th { text-align: left; font-weight: 600; color: var(--suave); background: var(--fondo); padding: 6px 8px; white-space: nowrap; }
+  td { padding: 3px 4px; border-top: 1px solid var(--borde); }
+  td input.campo { margin: 0; min-width: 80px; padding: 5px 6px; font-size: .88rem; }
+  td.desc input.campo { min-width: 180px; }
+  .vacio-res { color: var(--suave); text-align: center; padding: 8px; }
+  .modo { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--fondo); padding: 4px; border-radius: 12px; margin-top: 12px; }
+  .modo button { border: 0; background: transparent; color: var(--suave); font: inherit; padding: 9px 6px; border-radius: 9px; cursor: pointer; line-height: 1.25; }
+  .modo button b { display: block; font-size: .95rem; }
+  .modo button small { font-size: .78rem; }
+  .modo button.activo { background: var(--tarjeta); color: var(--texto); box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+  .modo button:disabled { opacity: .45; cursor: default; }
+  .etiqueta { font-size: .72rem; font-weight: 700; padding: 2px 7px; border-radius: 999px; background: var(--acento-suave); color: var(--acento); white-space: nowrap; }
+  #estado { color: var(--suave); font-size: .85rem; margin-top: 8px; min-height: 1.2em; }
+  details.texto { margin-top: 10px; font-size: .85rem; color: var(--suave); }
+  details.texto pre { white-space: pre-wrap; word-break: break-word; font: 12px/1.45 ui-monospace, Menlo, monospace; background: var(--fondo); padding: 10px; border-radius: 8px; max-height: 260px; overflow: auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1><img src="icono.svg" alt="">Lector de facturas</h1>
+  <p class="sub">Elige qué datos quieres, haz una foto a la factura y la app los copia por ti.</p>
+
+  <section class="tarjeta">
+    <h2><span class="paso">1</span>¿Qué datos quieres copiar?</h2>
+    <p class="ayuda">Se recuerda tu elección para las próximas facturas.</p>
+    <h3>Datos de la factura</h3>
+    <div class="chips" id="chips-cabecera"></div>
+    <h3>Por cada producto o línea</h3>
+    <div class="chips" id="chips-linea"></div>
+    <div class="atajos">
+      <button class="boton peq" type="button" data-atajo="basico">Básico</button>
+      <button class="boton peq" type="button" data-atajo="todo">Todo</button>
+      <button class="boton peq" type="button" data-atajo="nada">Ninguno</button>
+    </div>
+  </section>
+
+  <section class="tarjeta">
+    <h2><span class="paso">2</span>Foto o PDF de la factura</h2>
+    <p class="ayuda">Si la factura tiene varias páginas, añádelas todas antes de leer.</p>
+    <div class="modo" role="radiogroup" aria-label="Modo de lectura">
+      <button type="button" role="radio" data-modo="gratis"><b>Gratis</b><small>En el móvil, sin Internet</small></button>
+      <button type="button" role="radio" data-modo="ia"><b>Precisa (IA)</b><small>Claude · de pago</small></button>
+    </div>
+    <p class="ayuda" id="ayuda-modo" style="margin-top:6px"></p>
+    <div class="captura">
+      <label class="boton lleno"><b>📷</b>Hacer foto<input type="file" id="camara" accept="image/*" capture="environment"></label>
+      <label class="boton"><b>🖼️</b>Elegir fotos o PDF<input type="file" id="galeria" accept="image/*,application/pdf" multiple></label>
+    </div>
+    <div class="paginas" id="paginas"></div>
+    <div id="caja-clave" hidden style="margin-top:12px">
+      <label for="clave" style="font-weight:600">Clave de acceso</label>
+      <input class="campo" type="password" id="clave" autocomplete="current-password">
+    </div>
+    <button class="principal" id="leer" type="button" disabled>Leer factura</button>
+    <div class="barra" id="barra"><div></div></div>
+    <div id="estado" aria-live="polite"></div>
+    <div class="error" id="error" hidden></div>
+  </section>
+
+  <section id="seccion-res" hidden>
+    <div class="barra-res">
+      <button class="boton lleno" type="button" id="copiar">Copiar (para Excel)</button>
+      <button class="boton" type="button" id="csv">Descargar CSV</button>
+      <button class="boton" type="button" id="json">JSON</button>
+      <button class="boton" type="button" id="borrar">Borrar todo</button>
+    </div>
+    <div id="resultados"></div>
+  </section>
+</main>
+
+<script src="reglas.js"></script>
+<script src="ocr.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+const cargar = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (e) { return d; } };
+const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+let catalogo = null, paginas = [], facturas = cargar("facturas-resultados", []);
+let clave = cargar("facturas-clave", "");
+let modo = cargar("facturas-modo", "gratis"), iaDisponible = false, iaMotivo = "Comprobando…";
+
+// ---------- modo de lectura ----------
+const AYUDA_MODO = {
+  gratis: "Lee la foto en el propio móvil (Tesseract). Va bien con facturas claras e impresas; revisa siempre los datos.",
+  ia: "Usa la IA de Claude: entiende cualquier formato y las líneas de productos, pero cuesta unos céntimos por factura.",
+};
+function pintarModo() {
+  if (modo === "ia" && !iaDisponible) modo = "gratis";
+  document.querySelectorAll("[data-modo]").forEach((b) => {
+    b.classList.toggle("activo", b.dataset.modo === modo);
+    b.setAttribute("aria-checked", b.dataset.modo === modo);
+    if (b.dataset.modo === "ia") b.disabled = !iaDisponible;
+  });
+  $("#ayuda-modo").textContent = AYUDA_MODO[modo] + (iaDisponible ? "" : ` (Modo IA no disponible: ${iaMotivo})`);
+}
+document.querySelectorAll("[data-modo]").forEach((b) => b.addEventListener("click", () => {
+  modo = b.dataset.modo; guardar("facturas-modo", modo); pintarModo();
+}));
+
+// ---------- 1. selección de campos ----------
+function seleccion() {
+  const sel = { cabecera: [], linea: [] };
+  document.querySelectorAll(".chip input:checked").forEach((i) => sel[i.dataset.grupo].push(i.value));
+  return sel;
+}
+function marcar(sel) {
+  document.querySelectorAll(".chip input").forEach((i) => { i.checked = (sel[i.dataset.grupo] || []).includes(i.value); });
+  guardar("facturas-campos", seleccion());
+}
+function pintarChips() {
+  for (const grupo of ["cabecera", "linea"]) {
+    $(`#chips-${grupo}`).innerHTML = catalogo[grupo].map((c) =>
+      `<label class="chip"><input type="checkbox" data-grupo="${grupo}" value="${c.clave}"><span>${esc(c.etiqueta)}</span></label>`).join("");
+  }
+  marcar(cargar("facturas-campos", catalogo.por_defecto));
+  document.querySelectorAll(".chip input").forEach((i) => i.addEventListener("change", () => guardar("facturas-campos", seleccion())));
+}
+document.querySelectorAll("[data-atajo]").forEach((b) => b.addEventListener("click", () => {
+  const a = b.dataset.atajo;
+  marcar(a === "basico" ? catalogo.por_defecto
+    : a === "todo" ? { cabecera: catalogo.cabecera.map((c) => c.clave), linea: catalogo.linea.map((c) => c.clave) }
+    : { cabecera: [], linea: [] });
+}));
+
+// ---------- 2. fotos ----------
+function pintarPaginas() {
+  $("#paginas").innerHTML = paginas.map((p, i) => `<div class="pagina">${
+    p.url ? `<img src="${p.url}" alt="Página ${i + 1}">` : `📄<br>${esc(p.fichero.name).slice(0, 18)}`
+  }<button type="button" data-quitar="${i}" aria-label="Quitar página">×</button></div>`).join("");
+  $("#leer").disabled = !paginas.length;
+  $("#leer").textContent = paginas.length > 1 ? `Leer factura (${paginas.length} páginas)` : "Leer factura";
+}
+function anadir(ficheros) {
+  for (const f of ficheros) paginas.push({ fichero: f, url: f.type.startsWith("image/") ? URL.createObjectURL(f) : null });
+  pintarPaginas();
+}
+$("#camara").addEventListener("change", (e) => { anadir(e.target.files); e.target.value = ""; });
+$("#galeria").addEventListener("change", (e) => { anadir(e.target.files); e.target.value = ""; });
+$("#paginas").addEventListener("click", (e) => {
+  const i = e.target.dataset.quitar;
+  if (i === undefined) return;
+  const [p] = paginas.splice(+i, 1);
+  if (p.url) URL.revokeObjectURL(p.url);
+  pintarPaginas();
+});
+
+function mostrarError(msg) { $("#error").textContent = msg; $("#error").hidden = !msg; }
+
+$("#leer").addEventListener("click", async () => {
+  const sel = seleccion();
+  if (!sel.cabecera.length && !sel.linea.length) return mostrarError("Elige al menos un dato en el paso 1.");
+  if (!$("#caja-clave").hidden) { clave = $("#clave").value; guardar("facturas-clave", clave); }
+  mostrarError("");
+  $("#leer").disabled = true; $("#leer").textContent = "Leyendo factura…"; $("#barra").style.display = "block";
+  const estado = (t) => { $("#estado").textContent = t; };
+  try {
+    let res, texto = null;
+    if (modo === "gratis") {
+      texto = await LectorGratis.leerTexto(paginas.map((p) => p.fichero), estado);
+      res = ReglasFactura.extraer(texto, sel, Object.fromEntries(catalogo.cabecera.map((c) => [c.clave, c.etiqueta])));
+      if (res.vacio) throw new Error(res.avisos[0]);
+    } else {
+      estado("Enviando a la IA…");
+      const datos = new FormData();
+      datos.append("campos", JSON.stringify(sel));
+      paginas.forEach((p) => datos.append("ficheros", p.fichero, p.fichero.name));
+      const r = await fetch("api/facturas/leer", { method: "POST", body: datos, headers: { "X-Clave": clave } });
+      try { res = await r.json(); } catch (e) { throw new Error(r.status === 413 ? "Las fotos pesan demasiado (máx. 40 MB)." : `Error ${r.status}`); }
+      if (r.status === 401) throw new Error("Clave de acceso incorrecta.");
+      if (!r.ok) throw new Error(res.error || `Error ${r.status}`);
+    }
+    facturas.unshift({ id: Date.now(), campos: sel, datos: res, modo, texto });
+    guardar("facturas-resultados", facturas);
+    paginas.forEach((p) => p.url && URL.revokeObjectURL(p.url));
+    paginas = [];
+    pintarResultados();
+    $("#seccion-res").scrollIntoView({ behavior: "smooth" });
+  } catch (e) {
+    mostrarError(e.message === "Failed to fetch" ? "No se pudo conectar con la app." : e.message);
+  } finally {
+    $("#barra").style.display = "none";
+    estado("");
+    pintarPaginas();
+  }
+});
+
+// ---------- 3. resultados editables ----------
+const etiqueta = (grupo, clave) => (catalogo[grupo].find((c) => c.clave === clave) || {}).etiqueta || clave;
+const tipo = (grupo, clave) => (catalogo[grupo].find((c) => c.clave === clave) || {}).tipo;
+const mostrar = (v) => v === null || v === undefined ? "" : String(v);
+
+function entrada(fi, grupo, clave, valor, li) {
+  const num = tipo(grupo, clave) === "numero";
+  return `<input class="campo${valor === null || valor === undefined || valor === "" ? " vacio" : ""}" ${num ? 'inputmode="decimal"' : ""}
+    data-f="${fi}" data-g="${grupo}" data-c="${clave}" ${li !== undefined ? `data-l="${li}"` : ""} value="${esc(mostrar(valor))}">`;
+}
+
+function pintarResultados() {
+  $("#seccion-res").hidden = !facturas.length;
+  $("#resultados").innerHTML = facturas.map((f, fi) => {
+    const d = f.datos, cab = f.campos.cabecera, lin = f.campos.linea;
+    const titulo = [d.emisor_nombre, d.numero_factura && `nº ${d.numero_factura}`, d.fecha].filter(Boolean).join(" · ") || `Factura ${facturas.length - fi}`;
+    return `<article class="tarjeta factura">
+      <header><strong>${esc(titulo)}</strong><span class="etiqueta">${f.modo === "ia" ? "IA" : "Gratis"}</span><button class="boton peq" type="button" data-borrar="${fi}">Quitar</button></header>
+      ${cab.length ? `<div class="datos">${cab.map((c) => `<div><label>${esc(etiqueta("cabecera", c))}</label>${entrada(fi, "cabecera", c, d[c])}</div>`).join("")}</div>` : ""}
+      ${lin.length ? `<div class="tabla-caja"><table><thead><tr>${lin.map((c) => `<th>${esc(etiqueta("linea", c))}</th>`).join("")}</tr></thead><tbody>${
+        (d.lineas || []).length ? d.lineas.map((l, li) => `<tr>${lin.map((c) => `<td class="${c === "descripcion" ? "desc" : ""}">${entrada(fi, "linea", c, l[c], li)}</td>`).join("")}</tr>`).join("")
+        : `<tr><td class="vacio-res" colspan="${lin.length}">No se encontraron líneas</td></tr>`}</tbody></table></div>` : ""}
+      ${(d.avisos || []).length ? `<ul class="avisos">${d.avisos.map((a) => `<li>${esc(a)}</li>`).join("")}</ul>` : ""}
+      ${f.texto ? `<details class="texto"><summary>Ver el texto leído</summary><pre>${esc(f.texto)}</pre></details>` : ""}
+    </article>`;
+  }).join("");
+}
+
+$("#resultados").addEventListener("input", (e) => {
+  const t = e.target;
+  if (!t.dataset.c) return;
+  const f = facturas[+t.dataset.f];
+  let v = t.value.trim();
+  if (tipo(t.dataset.g, t.dataset.c) === "numero" && v !== "") {
+    const n = Number(v.replace(/\s|€/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", "."));
+    v = Number.isFinite(n) ? n : v;
+  }
+  if (v === "") v = null;
+  if (t.dataset.g === "cabecera") f.datos[t.dataset.c] = v; else f.datos.lineas[+t.dataset.l][t.dataset.c] = v;
+  t.classList.toggle("vacio", v === null);
+  guardar("facturas-resultados", facturas);
+});
+$("#resultados").addEventListener("click", (e) => {
+  const i = e.target.dataset.borrar;
+  if (i === undefined) return;
+  facturas.splice(+i, 1); guardar("facturas-resultados", facturas); pintarResultados();
+});
+$("#borrar").addEventListener("click", () => {
+  if (!confirm("¿Borrar todas las facturas leídas?")) return;
+  facturas = []; guardar("facturas-resultados", facturas); pintarResultados();
+});
+
+// ---------- exportar ----------
+// Una fila por línea de producto (repitiendo los datos de la factura) o una por factura si no hay líneas.
+function tabla() {
+  const cab = [], lin = [];
+  for (const f of [...facturas].reverse()) {
+    f.campos.cabecera.forEach((c) => cab.includes(c) || cab.push(c));
+    f.campos.linea.forEach((c) => lin.includes(c) || lin.push(c));
+  }
+  const cabOrden = catalogo.cabecera.map((c) => c.clave).filter((c) => cab.includes(c));
+  const linOrden = catalogo.linea.map((c) => c.clave).filter((c) => lin.includes(c));
+  const titulos = [...cabOrden.map((c) => etiqueta("cabecera", c)), ...linOrden.map((c) => etiqueta("linea", c))];
+  const filas = [];
+  for (const f of [...facturas].reverse()) {
+    const base = cabOrden.map((c) => [f.datos[c], tipo("cabecera", c)]);
+    const lineas = linOrden.length && (f.datos.lineas || []).length ? f.datos.lineas : [{}];
+    for (const l of lineas) filas.push([...base, ...linOrden.map((c) => [l[c], tipo("linea", c)])]);
+  }
+  return { titulos, filas };
+}
+const numES = (v) => typeof v === "number" ? String(v).replace(".", ",") : mostrar(v);
+
+$("#copiar").addEventListener("click", async () => {
+  const { titulos, filas } = tabla();
+  const texto = [titulos, ...filas.map((f) => f.map(([v]) => numES(v).replace(/[\t\n]/g, " ")))].map((f) => f.join("\t")).join("\n");
+  try { await navigator.clipboard.writeText(texto); $("#copiar").textContent = "¡Copiado!"; }
+  catch (e) { prompt("Copia este texto:", texto); }
+  setTimeout(() => { $("#copiar").textContent = "Copiar (para Excel)"; }, 1800);
+});
+
+function descargar(nombre, contenido, tipoMime) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([contenido], { type: tipoMime }));
+  a.download = nombre; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+const fecha = () => new Date().toISOString().slice(0, 10);
+$("#csv").addEventListener("click", () => {
+  const { titulos, filas } = tabla();
+  const celda = (t) => /[;"\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+  // Separador ";" y coma decimal: es lo que espera Excel en español.
+  const csv = [titulos.map(celda), ...filas.map((f) => f.map(([v]) => celda(numES(v))))].map((f) => f.join(";")).join("\r\n");
+  descargar(`facturas-${fecha()}.csv`, "﻿" + csv, "text/csv;charset=utf-8");
+});
+$("#json").addEventListener("click", () => {
+  descargar(`facturas-${fecha()}.json`, JSON.stringify(facturas.slice().reverse().map((f) => f.datos), null, 2), "application/json");
+});
+
+// ---------- inicio ----------
+fetch("api/estado").then((r) => r.json()).then((e) => {
+  if (e.clave) { $("#caja-clave").hidden = false; $("#clave").value = clave; }
+  iaDisponible = !!e.facturas;
+  iaMotivo = "falta poner ANTHROPIC_API_KEY en el servidor (ver README)";
+}).catch(() => { iaMotivo = "necesita la app arrancada con python app.py"; }).finally(pintarModo);
+fetch("campos.json").then((r) => r.json()).then((c) => { catalogo = c; pintarChips(); pintarResultados(); })
+  .catch(() => mostrarError("No se pudo cargar la lista de datos. Recarga la página."));
+</script>
+</body>
+</html>
