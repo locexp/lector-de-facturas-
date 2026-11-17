@@ -106,7 +106,7 @@
   function buscarNifs(lineas) {
     const res = [];
     lineas.forEach((l, i) => {
-      const candidatos = [...l.matchAll(RE_NIF)].map((m) => m[0]);
+      const candidatos = [...l.replace(/(\d{7,8})([a-z])\b/g, (m, a, b) => a + b.toUpperCase()).matchAll(RE_NIF)].map((m) => m[0]);
       if (/\b(nif|dni|cif|nie|n\.i\.f|d\.n\.i)\b/i.test(quitarTildes(l))) {
         for (const m of l.matchAll(RE_DNI_SIN_LETRA)) {
           const d = m[0].replace(/\D/g, ""), letra = LETRA_COMO_NUMERO[d[8]];
@@ -147,8 +147,8 @@
     cliente: /\b(cliente|destinatario|facturar a|datos del cliente|comprador|receptor|sr\.?|sra\.?)\b/,
     emisor: /\b(emisor|proveedor|vendedor)\b/,
     total: /\b(total|importe total|a pagar|total factura|liquido)\b/,
-    noTotal: /\b(subtotal|sub-total|total base|base|total iva|total impuestos|total cuota|total dto|total descuento|total lineas?|total articulos|total unidades|total uds|total items)\b/,
-    base: /\b(base imponible|base imp\.?|b\. ?imponible|base)\b/,
+    noTotal: /\b(subtotal|sub-total|total base|total b\.?\s?i\.?|base|total iva|total impuestos|total cuota|total dto|total descuento|total lineas?|total articulos|total unidades|total uds|total items)\b/,
+    base: /\b(base imponible|base imp\.?|b\. ?imponible|total b\.?\s?i|base)\b/,
     iva: /\b(i\.?v\.?a\.?|cuota)\b/,
     recargo: /\b(recargo|r\.? ?e\.? )\b/,
     irpf: /\b(irpf|retencion)\b/,
@@ -224,7 +224,7 @@
   }
 
   function limpiarNombre(l) {
-    return l.replace(/^(?:[^\s\p{Lu}]\S?\s+)+/u, "").replace(/(,?\s+)[Ss][i1|]$/, "$1SL").replace(/^\s*(cliente|emisor|proveedor|raz[oó]n social|nombre|destinatario|facturar a)\s*[:.]?\s*/i, "")
+    return l.replace(/\s{3,}[^\s:]+(?:\s[^\s:]+)*:.*$/, "").replace(/^(?:[^\s\p{Lu}]\S?\s+)+/u, "").replace(/(,?\s+)[Ss][i1|]$/, "$1SL").replace(/^\s*(cliente|emisor|proveedor|raz[oó]n social|nombre|destinatario|facturar a)\s*[:.]?\s*/i, "")
       .replace(/\s*(N\.?I\.?F|C\.?I\.?F|NIF|CIF)\b.*$/i, "").replace(/\s{2,}/g, " ").replace(/[\s,;:]+$/, "").trim() || null;
   }
 
@@ -301,13 +301,14 @@
       p.forEach((l, i) => {
         if (re.test(l) && !(excluir && excluir.test(l))) {
           const v = importeTrasClave(lineas, i, re);
-          if (v !== null) vals.push(Math.abs(v));
+          if (v !== null) vals.push(v);
         }
       });
       return vals;
     };
     const totales = sumaClave(K.total, K.noTotal);
-    d.total = totales.length ? Math.max(...totales) : null;
+    // el mayor en valor absoluto (en un abono los importes son negativos)
+    d.total = totales.length ? totales.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a)) : null;
 
     let bases = sumaClave(K.base);
     if (!bases.length) bases = sumaClave(/\bsub-?\s?total\b/);   // "Subtotal" = base cuando no pone "Base imponible"
@@ -328,8 +329,9 @@
     d.tipo_iva = tipos.length ? tipos.sort((a, b) => a - b).map((t) => String(t).replace(".", ",")).join(" / ") : null;
 
     const uno = (re) => { const v = sumaClave(re); return v.length ? v[v.length - 1] : null; };
+    const unoAbs = (re) => { const v = uno(re); return v === null ? null : Math.abs(v); };
     d.recargo_equivalencia = uno(K.recargo);
-    d.irpf = uno(K.irpf);
+    d.irpf = unoAbs(K.irpf);
     d.descuento = (() => { const i = p.findIndex((l) => /^\s*(total\s*)?(descuento|dto)/.test(l)); return i >= 0 ? importeTrasClave(lineas, i) : null; })();
     d.otros_impuestos = uno(/\b(igic|ipsi|tasa|impuesto especial)\b/);
 
@@ -427,7 +429,7 @@
     // Cuadrar base + IVA = total, completando el dato que falte
     const { base_imponible: b, cuota_iva: c, total: t } = d;
     const extra = (d.recargo_equivalencia || 0) + (d.otros_impuestos || 0) - (d.irpf || 0);
-    if (b !== null && t !== null && c === null && t - b - extra > 0) {
+    if (b !== null && t !== null && c === null && Math.abs(t - b - extra) > 0 && Math.sign(t - b - extra) === Math.sign(t)) {
       d.cuota_iva = red2(t - b - extra); avisos.push("La cuota de IVA se ha calculado como total − base.");
     } else if (b === null && c !== null && t !== null) {
       d.base_imponible = red2(t - c - extra); avisos.push("La base imponible se ha calculado como total − IVA.");
@@ -468,7 +470,7 @@
     "euro euros articulos articulo unidades uds lineas items impuesto impuestos exento exenta incluido incl " +
     "descuento descuentos dto ahorro ahorrado puntos tipo neto bruto liquido ref referencia descripcion concepto " +
     "conceptos cant cantidad precio precios unidad unitario unit pvp calle avda avenida plaza paseo ctra carretera " +
-    "bienes servicios orden comercial plazo und lote caducidad cad dtos lineas peso kg transportista agente zona albaran pedido cajero cajera atendido vendedor tienda caja establecimiento observaciones notas registro mercantil tomo folio hoja"
+    "cajas promos promo prom bienes servicios orden comercial plazo und lote caducidad cad dtos lineas peso kg transportista agente zona albaran pedido cajero cajera atendido vendedor tienda caja establecimiento observaciones notas registro mercantil tomo folio hoja"
   ).split(" "));
   const PALABRAS_VACIAS = new Set("por para del las los con sin que una uno sus les nos ese esa este esta".split(" "));
 
@@ -541,7 +543,9 @@
     resto = resto.trim().replace(/^(?!\[[^\]]{1,20}\])(?:[|\]\[!}{¡]\s*|[lI]\s+(?=\d))(?=[A-ZÁÉÍÓÚÑ0-9])/, "");
     let cantidad = null, referencia = null;
     // código numérico de 4 o más cifras al principio ("1261  GIR. AGUASAL..."): es la referencia
-    const cod = resto.match(/^(\d{4,})\s+(?=[A-Za-zÁÉÍÓÚÑ])/);
+    // marcas del margen de la foto delante del código: "S 340069480 …", "EA 340…", "=1 340…"
+    resto = resto.replace(/^(?:[A-Za-z]{1,2}|\S?[^\s\w]\S?)\s+(?=\d{4,}\s)/, "");
+    const cod = resto.match(/^(\d{4,})\s+(?=[*A-Za-zÁÉÍÓÚÑ])/);
     if (cod) { referencia = cod[1]; resto = resto.slice(cod[0].length); }
     const q = cod ? null : resto.match(/^(\d+(?:[.,]\d{1,3})?)\s*(?:x|uds?\.?|u\.|ud\.|kg|und\.?)?\s+(?=\D|\d+\s+[A-Za-zÁÉÍÓÚÑ])/i);
     if (q) { cantidad = parsearImporte(q[1]); resto = resto.slice(q[0].length); }
@@ -564,6 +568,16 @@
     if (!/[a-zñ]{3,}/i.test(descripcion) || esResumen(descripcion)) return null;
     if (buscarNifs([descripcion]).some((n) => n.valido)) return null;   // datos del cliente/emisor
 
+    // última columna = % de IVA sin el símbolo ("… -6,45   10,0"): si con el penúltimo como importe
+    // cuadra cantidad x precio (o es un importe con céntimos y el último no), el último es el tipo
+    if (!importeIlegible && nums.length >= 3 && tipo === null) {
+      const ult = nums[nums.length - 1], pen = nums[nums.length - 2];
+      const pareceTipo = TIPOS_IVA.includes(ult.n) && ult.n > 0;
+      const resto2 = nums.slice(0, -2).map((o) => o.n);
+      if (pareceTipo && (buscarCantidadPrecio(resto2, pen.n) || (pen.decimales && Math.abs(pen.n) !== ult.n && nums.length >= 4))) {
+        tipo = ult.n; nums = nums.slice(0, -1);
+      }
+    }
     const v = nums.map((o) => o.n);
     if (importeIlegible) v.push(null);
     let importe = v[v.length - 1];
@@ -722,6 +736,7 @@
         // "195" en un tique donde todo lleva céntimos es "1,95": se corrige y se marca para revisar.
         // "50" puede ser "1,50" o "0,50": no se sabe, se deja sin importe (y se calcula si es el único)
         if (l.sinComa.length >= 3) l.importe = red2(l.importe / 100);
+        else if (l.cantidad !== null && l.precio !== null) l.importe = red2(x_cp(l));   // "-8  0,740  5": vale -8 x 0,740
         else { l.importe = null; l.precio = null; }
         if (l.importe !== null && (l.cantidad === 1 || l.cantidad === null)) { l.precio = l.importe; l.cantidad = 1; }
         l.revisar = true;
@@ -806,8 +821,16 @@
       const h = Math.max(4, mediana(ps.map((w) => w.y1 - w.y0)));
       let texto = ps[0].texto;
       for (let i = 1; i < ps.length; i++) texto += (ps[i].x0 - ps[i - 1].x1 > h * 1.2 ? "    " : " ") + ps[i].texto;
-      trozos.push({ texto, x0: ps[0].x0, x1: ps[ps.length - 1].x1, yc: mediana(ps.map((w) => (w.y0 + w.y1) / 2)), h });
+      // inclinación de la línea: de la primera a la última palabra (si la línea es larga)
+      const a0 = ps[0], a1 = ps[ps.length - 1];
+      const pend = ps.length >= 3 && a1.x0 - a0.x0 > h * 8 ? ((a1.y0 + a1.y1) - (a0.y0 + a0.y1)) / 2 / (a1.x0 - a0.x0) : null;
+      trozos.push({ texto, x0: ps[0].x0, x1: ps[ps.length - 1].x1, yc: mediana(ps.map((w) => (w.y0 + w.y1) / 2)), h, pend });
     }
+    // foto algo torcida: los renglones suben o bajan hacia la derecha; se corrige la altura de cada
+    // trozo con la inclinación típica de las líneas largas antes de agruparlos
+    const pends = trozos.map((t) => t.pend).filter((v) => v !== null && Math.abs(v) < 0.1);
+    const pend = pends.length >= 3 ? mediana(pends) : 0;
+    for (const t of trozos) t.yc -= pend * (t.x0 + t.x1) / 2;
     trozos.sort((a, b) => a.yc - b.yc);
     const filas = [];
     for (const t of trozos) {
@@ -850,6 +873,21 @@
       return { lineas: [], avisos: ["No se ha podido leer texto en la imagen. Prueba con más luz, la factura recta y sin sombras."], vacio: true };
     }
     const cab = cabecera(todas, avisos);
+    // Si la tabla de impuestos no se lee pero todas las líneas llevan el mismo % de IVA, ese es el
+    // de la factura, y con él se calculan la cuota y el total que falten
+    const tiposLineas = [...new Set(buscarProductos(todas).map((l) => l.tipo_iva).filter((t) => t !== null))];
+    if (cab.tipo_iva === null && tiposLineas.length === 1) {
+      const t = tiposLineas[0];
+      cab.tipo_iva = String(t).replace(".", ",");
+      if (cab.cuota_iva === null && cab.base_imponible !== null) {
+        cab.cuota_iva = red2(cab.base_imponible * t / 100);
+        avisos.push("La cuota de IVA no se leía; se ha calculado como base × tipo de IVA de las líneas.");
+      }
+      if (cab.total === null && cab.base_imponible !== null && cab.cuota_iva !== null) {
+        cab.total = red2(cab.base_imponible + cab.cuota_iva + (cab.recargo_equivalencia || 0) - (cab.irpf || 0));
+        avisos.push("El total no se leía; se ha calculado como base + IVA: revísalo.");
+      }
+    }
     const salida = {};
     for (const c of seleccion.cabecera || []) salida[c] = c in cab ? cab[c] : null;
     if ((seleccion.linea || []).length) {
